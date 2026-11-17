@@ -1,0 +1,28 @@
+name: Collect GitHub stats
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --omit=dev
+
+      - name: Collect stats for every installation
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_APP_ID: ${{ secrets.APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: npm run collect

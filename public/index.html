@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RepoLedger</title>
+    <meta name="description" content="GitHub traffic, kept for good. Look up any GitHub user's public stats, or sign in to keep your own views and clones past GitHub's 14-day limit." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%231d1b16'/><path d='M7 24 L13 15 L18 19 L25 8' stroke='%23f4f1ea' stroke-width='3' fill='none'/></svg>" />
+    <script src="/theme-init.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/accounts.css" />
+  </head>
+  <body>
+    <div id="boot" class="boot">Loading…</div>
+
+    <header class="masthead" id="masthead" hidden>
+      <div class="wrap masthead-inner">
+        <div>
+          <a class="wordmark" href="/">Repo<em>Ledger</em></a>
+          <p class="tagline">GitHub traffic, kept long after GitHub's 14-day window closes.</p>
+        </div>
+        <div class="masthead-actions" id="masthead-actions"></div>
+      </div>
+    </header>
+
+    <!-- Signed out: landing -->
+    <main id="landing" class="wrap" hidden>
+      <section class="hero">
+        <p class="eyebrow">A permanent record of your GitHub repositories</p>
+        <h1>GitHub forgets your traffic after 14&nbsp;days. RepoLedger keeps it.</h1>
+        <p class="hero-lede">
+          Look up any GitHub user to see their public repositories' stars, commits and contributors. Sign in to keep your
+          own views, clones and referring sites, recorded every six hours, for as long as you like.
+        </p>
+
+        <form id="lookup-form" class="lookup" autocomplete="off">
+          <label for="lookup-input" class="label">Look up a GitHub user</label>
+          <div class="lookup-row">
+            <span class="lookup-prefix">github.com/</span>
+            <input id="lookup-input" type="text" placeholder="username" spellcheck="false" autocapitalize="off" required maxlength="39" />
+            <button type="submit" class="solid-btn">Look up</button>
+          </div>
+          <p class="hint">Public data only, no sign-in needed.</p>
+        </form>
+
+        <div class="or-signin" id="or-signin">
+          <span>or</span>
+          <a class="outline-btn" href="/auth/login" id="signin-hero"><svg class="gh-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2 0 1.9 1.2 1.9 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6 0-3.2 0 0 1-.3 3.4 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8 0 3.2.9.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.1.7.8.6A12 12 0 0 0 12 .3"/></svg>Sign in with GitHub to see your traffic</a>
+        </div>
+        <p id="landing-notice" class="notice" role="status" hidden></p>
+      </section>
+
+      <section class="landing-section">
+        <h2 class="section-label">What you get</h2>
+        <table class="compare">
+          <thead>
+            <tr><th></th><th>Look up a username</th><th>Sign in</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Stars, with full history</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Commits and lines changed</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Issues and pull requests</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Contributors</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Views and unique visitors</td><td class="no">No</td><td>Yes</td></tr>
+            <tr><td>Clones</td><td class="no">No</td><td>Yes</td></tr>
+            <tr><td>Referring sites</td><td class="no">No</td><td>Yes</td></tr>
+            <tr><td>Private repositories</td><td class="no">No</td><td>The ones you choose</td></tr>
+          </tbody>
+        </table>
+        <p class="fine">GitHub only shares traffic with people who can push to a repository, so traffic needs you to sign in.</p>
+      </section>
+
+      <section class="landing-section" id="trust">
+        <h2 class="section-label">What RepoLedger can and can't see</h2>
+        <div class="trust-grid">
+          <div>
+            <h3>When you sign in, it can read</h3>
+            <ul class="marks yes">
+              <li>Traffic for the repositories you pick: views, clones, referring sites, popular pages</li>
+              <li>Star, commit, contributor, issue and pull-request counts</li>
+              <li>Repository settings, read-only. GitHub only shares traffic with apps that have this permission. RepoLedger uses it for traffic and nothing else.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>It can't</h3>
+            <ul class="marks no">
+              <li>Read your code or files. It never asks for that permission.</li>
+              <li>Change anything. Every permission is read-only.</li>
+              <li>See repositories you didn't select</li>
+              <li>See your password or email. The sign-in token is used once to learn your username, then revoked.</li>
+            </ul>
+          </div>
+        </div>
+        <dl class="faq">
+          <dt>Who can see my traffic?</dt>
+          <dd>Only you, when signed in. Public lookups of your username never include traffic.</dd>
+          <dt>How do I stop it?</dt>
+          <dd>Use <em>Delete my data</em> in the account menu, which uninstalls the app and deletes your stats immediately. Or uninstall RepoLedger from your GitHub settings; your data is deleted on the next collection run.</dd>
+          <dt>What is stored?</dt>
+          <dd>Your GitHub username and avatar, and the daily counts listed above. Nothing else.</dd>
+        </dl>
+        <p class="fine" id="source-link" hidden></p>
+      </section>
+    </main>
+
+    <!-- Signed in, setting up -->
+    <main id="onboard" class="wrap onboard" hidden></main>
+
+    <!-- Dashboard (owner) and public profile -->
+    <div id="dashboard" hidden>
+      <section id="profile-head" class="wrap profile-head" hidden></section>
+
+      <div id="toolbar" class="toolbar">
+        <div class="wrap toolbar-row">
+          <div class="control">
+            <span class="label" id="period-label">Period</span>
+            <div class="segmented" id="period" role="radiogroup" aria-labelledby="period-label"></div>
+          </div>
+
+          <div class="control" id="custom-range" hidden>
+            <span class="label">Range</span>
+            <div class="range">
+              <input type="date" id="from-date" aria-label="From date" />
+              <span class="range-sep">to</span>
+              <input type="date" id="to-date" aria-label="To date" />
+            </div>
+          </div>
+
+          <div class="control">
+            <span class="label">Repositories</span>
+            <div class="picker" id="repo-picker"></div>
+          </div>
+
+          <p class="summary" id="summary" aria-live="polite"></p>
+        </div>
+
+        <nav class="wrap index" id="tabs" role="tablist" aria-label="Sections"></nav>
+        <div class="progress" id="progress" hidden></div>
+      </div>
+
+      <main class="wrap" id="panels"></main>
+    </div>
+
+    <footer class="wrap colophon" id="colophon" hidden>
+      <span>RepoLedger · data from the GitHub REST API</span>
+      <button id="theme-toggle" class="text-btn" type="button"></button>
+    </footer>
+
+    <dialog id="delete-dialog" class="dialog">
+      <form method="dialog">
+        <h2>Delete your data?</h2>
+        <p>
+          This uninstalls RepoLedger from your GitHub account and permanently deletes your stored traffic and
+          statistics. GitHub only keeps 14 days of traffic, so older history can't be recovered.
+        </p>
+        <p id="delete-error" class="notice" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button value="cancel" class="outline-btn" type="submit">Cancel</button>
+          <button id="delete-confirm" class="danger-btn" type="button">Delete everything</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/vendor/plotly.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
