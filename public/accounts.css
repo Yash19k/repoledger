@@ -1,6 +1,17 @@
 /* RepoLedger — landing, accounts, onboarding, public profiles */
 
+.masthead-right { display: flex; align-items: center; gap: 12px; }
 .masthead-actions { display: flex; align-items: center; gap: 16px; }
+.signin-btn { padding: 7px 14px; font-size: 14px; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; padding: 0; cursor: pointer;
+  border: 1px solid var(--rule-strong); background: transparent; color: var(--ink);
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 560px) {
+  .signin-btn { padding: 6px 10px; font-size: 13px; }
+}
 
 .outline-btn {
   display: inline-flex; align-items: center; gap: 8px;

@@ -670,7 +670,7 @@
   function renderMastheadActions() {
     const root = $("masthead-actions");
     if (!state.me) {
-      root.replaceChildren(state.config.sign_in ? h("a", { class: "text-btn", href: "/auth/login" }, "Sign in") : "");
+      root.replaceChildren(h("a", { class: "outline-btn signin-btn", href: "/auth/login" }, "Sign in with GitHub"));
       return;
     }
     const { user, installations, install_url } = state.me;
@@ -765,7 +765,15 @@
 
   function wireTheme() {
     const btn = $("theme-toggle");
-    const label = () => (btn.textContent = theme() === "dark" ? "Light mode" : "Dark mode");
+    const SUN = "M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z";
+    const MOON = "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z";
+    const label = () => {
+      const dark = theme() === "dark";
+      const text = dark ? "Switch to light mode" : "Switch to dark mode";
+      btn.replaceChildren(svg(dark ? SUN : MOON, 18));
+      btn.setAttribute("aria-label", text);
+      btn.title = text;
+    };
     label();
     btn.addEventListener("click", () => {
       const next = theme() === "dark" ? "light" : "dark";
@@ -810,7 +818,6 @@
       $("landing-notice").hidden = false;
       history.replaceState(null, "", "/");
     }
-    if (!state.config.sign_in) $("or-signin").hidden = true;
     if (state.config.source_url) {
       const p = $("source-link");
       p.replaceChildren("RepoLedger is open source. ", h("a", { href: state.config.source_url, rel: "noopener" }, "Read the code ↗"));
