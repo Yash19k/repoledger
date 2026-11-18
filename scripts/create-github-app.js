@@ -30,7 +30,8 @@ const manifest = {
   setup_url: `${base}/auth/installed`,
   setup_on_update: true,
   request_oauth_on_install: false,
-  hook_attributes: { url: `${base}/github/webhook`, active: false },
+  // No webhook: uninstalls are picked up by the collector. GitHub also rejects
+  // a localhost webhook URL even when it's inactive.
   default_events: [],
   // Read-only. "administration: read" is what GitHub requires for traffic data.
   // No "contents" permission, so the app can never read code.
