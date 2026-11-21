@@ -18,6 +18,11 @@ function fromApi(inst) {
   };
 }
 
+// Installations whose owner deleted their data while a collection was running.
+const cancelled = new Set();
+/** Stop any running collection for this installation and clean up whatever it writes afterwards. */
+const cancel = (installationId) => cancelled.add(installationId);
+
 /** Refresh one installation's repo list and collect stats for each repo. */
 async function syncInstallation(inst) {
   const row = fromApi(inst);
@@ -40,11 +45,18 @@ async function syncInstallation(inst) {
 
   log.info(`Installation ${row.id} (${row.account_login}): ${repos.length} repos`);
   for (const repo of repos) {
+    if (cancelled.has(row.id)) break;
     try {
       await collectRepo(gh, repo, { traffic: true });
     } catch (e) {
       log.error(`Unexpected error collecting ${repo.full_name}: ${e.message}`);
     }
+  }
+  if (cancelled.has(row.id)) {
+    // The owner deleted their data mid-run: remove anything this run wrote after that.
+    cancelled.delete(row.id);
+    await db.purgeRepos(repos.map((r) => r.full_name));
+    return;
   }
   await db.markInstallationCollected(row.id);
 }
@@ -77,7 +89,7 @@ async function run() {
   log.info("Collection complete.");
 }
 
-module.exports = { run, collectInstallationById, syncInstallation };
+module.exports = { run, collectInstallationById, syncInstallation, cancel };
 
 if (require.main === module) {
   run()

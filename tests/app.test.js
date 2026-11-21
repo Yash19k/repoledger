@@ -237,3 +237,47 @@ test("an offline database is reported, not treated as signed out", async () => {
     assert.equal(res.status, 503);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Input validation and data accuracy
+// ---------------------------------------------------------------------------
+
+test("impossible dates are rejected and reversed ranges are swapped", async () => {
+  const headers = signIn();
+  const seen = [];
+  db.getViews = async (repos, start, end) => (seen.push([start, end]), []);
+  await withServer(async (base) => {
+    assert.equal((await fetch(base + "/api/data?start=2026-13-45&end=2026-01-31", { headers })).status, 400);
+    assert.equal((await fetch(base + "/api/data?start=2026-02-30&end=2026-03-01", { headers })).status, 400);
+    assert.equal((await fetch(base + "/api/data?start=2026-03-01&end=2026-01-01", { headers })).status, 200);
+  });
+  assert.deepEqual(seen, [["2026-01-01", "2026-03-01"]]);
+});
+
+test("a malformed request body is a 400, not a server error", async () => {
+  await withServer(async (base) => {
+    const res = await fetch(base + "/auth/logout", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8600" },
+      body: "{not json",
+    });
+    assert.equal(res.status, 400);
+  });
+});
+
+test("issue counts don't include pull requests", async () => {
+  const { collectRepo } = require("../src/collect-repo");
+  const counts = { "pulls?state=open": 3, "pulls?state=closed": 10, "issues?state=closed": 25 };
+  const gh = {
+    json: async () => null,
+    paginate: async () => [],
+    totalCount: async (path) => counts[Object.keys(counts).find((k) => path.endsWith(k))],
+  };
+  let saved = null;
+  db.hasStarHistory = async () => true;
+  db.upsertStarStats = async () => {};
+  db.upsertIssuePrStats = async (...args) => (saved = args.slice(2));
+  await collectRepo(gh, { full_name: "me/alpha", stargazers_count: 0, open_issues_count: 8 });
+  // open: 8 - 3 PRs = 5 issues; closed: 25 - 10 PRs = 15 issues; PRs: 3 open, 10 closed
+  assert.deepEqual(saved, [5, 15, 3, 10]);
+});

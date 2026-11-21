@@ -8,10 +8,8 @@ const db = require("./db");
 const log = require("./log");
 const { GithubError } = require("./github");
 
-function localDate(d = new Date()) {
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+/** Today's date in UTC, matching the dates GitHub uses for traffic and weekly stats. */
+const localDate = (d = new Date()) => d.toISOString().slice(0, 10);
 
 const weekToDate = (unixSeconds) => new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 
@@ -123,10 +121,14 @@ async function collectRepo(gh, repo, { traffic = false } = {}) {
   });
 
   await step("issues/PRs", async () => {
-    const closedIssues = await gh.totalCount(`${base}/issues?state=closed`);
+    // GitHub's issue counts include pull requests, so subtract the PRs to get real issues.
     const openPrs = await gh.totalCount(`${base}/pulls?state=open`);
-    const mergedPrs = await gh.totalCount(`${base}/pulls?state=closed`);
-    await db.upsertIssuePrStats(name, localDate(), repo.open_issues_count, closedIssues, openPrs, mergedPrs);
+    const closedPrs = await gh.totalCount(`${base}/pulls?state=closed`);
+    const closedIssuesAndPrs = await gh.totalCount(`${base}/issues?state=closed`);
+    const openIssues = Math.max(0, (repo.open_issues_count || 0) - openPrs);
+    const closedIssues = Math.max(0, closedIssuesAndPrs - closedPrs);
+    // Stored in the merged_prs column: closed PRs (merged or not). GitHub has no cheap merged-only count.
+    await db.upsertIssuePrStats(name, localDate(), openIssues, closedIssues, openPrs, closedPrs);
     log.info("  issues/PRs: done");
   });
 }

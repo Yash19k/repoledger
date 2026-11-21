@@ -83,6 +83,9 @@
   const shortName = (repo) => repo.slice(repo.indexOf("/") + 1);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  /** Sized GitHub avatar; works whether or not the URL already has a query string. */
+  const avatarSrc = (url, size) => `${url}${url.includes("?") ? "&" : "?"}s=${size}`;
+
   const sum = (rows, key) => rows.reduce((acc, r) => (r[key] == null ? acc : acc + Number(r[key])), 0);
 
   function sortBy(rows, key, desc = false) {
@@ -201,15 +204,17 @@
     const t = isoDate(today());
     let start = t;
     let end = t;
+    // GitHub dates are UTC, which can already be "tomorrow" for people west of UTC.
+    let queryEnd = isoDate(addDays(today(), 1));
     if (state.preset === "custom") {
-      start = state.customFrom;
-      end = state.customTo;
+      [start, end] = state.customFrom <= state.customTo ? [state.customFrom, state.customTo] : [state.customTo, state.customFrom];
+      queryEnd = end;
     } else if (state.preset === "all") {
       start = "2000-01-01";
     } else {
       start = isoDate(addDays(today(), -PRESETS.find((p) => p.id === state.preset).days));
     }
-    return { repos, useAll, start, end };
+    return { repos, useAll, start, end, queryEnd };
   }
 
   // -------------------------------------------------------------------------
@@ -282,7 +287,7 @@
       return {
         type: "bar",
         name: repo,
-        x: rr.map((r) => r[x]),
+        x: rr.map((r) => (xDate ? r[x] : escapeHtml(r[x]))), // category labels are rendered as Plotly markup
         y: rr.map((r) => r[key]),
         marker: { color: colorFor(repo), line: { width: 0 } },
         hovertemplate: `<b>${escapeHtml(shortName(repo))}</b><br>${xDate ? "%{x|%b %d, %Y}" : "%{x}"}<br>${escapeHtml(label)}: %{y:,}<extra></extra>`,
@@ -569,7 +574,7 @@
             ["Open issues", sum(latest, "open_issues")],
             ["Closed issues", sum(latest, "closed_issues")],
             ["Open PRs", sum(latest, "open_prs")],
-            ["Merged PRs", sum(latest, "merged_prs")],
+            ["Closed PRs", sum(latest, "merged_prs")],
           ],
           "Totals use the latest snapshot for each repository."
         );
@@ -577,13 +582,13 @@
         const g = figs(sheet);
         figure(g, {
           title: "Issues",
-          unit: "solid open · dashed closed",
+          unit: "solid open · dotted closed",
           traces: lineTraces(rows, "snapshot_date", [{ key: "open_issues", label: "Open issues" }, { key: "closed_issues", label: "Closed issues", dash: "dot" }]),
         });
         figure(g, {
           title: "Pull requests",
-          unit: "solid open · dashed merged",
-          traces: lineTraces(rows, "snapshot_date", [{ key: "open_prs", label: "Open PRs" }, { key: "merged_prs", label: "Merged PRs", dash: "dot" }]),
+          unit: "solid open · dotted closed",
+          traces: lineTraces(rows, "snapshot_date", [{ key: "open_prs", label: "Open PRs" }, { key: "merged_prs", label: "Closed PRs", dash: "dot" }]),
         });
       },
     },
@@ -671,7 +676,7 @@
     const btn = h(
       "button",
       { type: "button", class: "account-btn", "aria-haspopup": "true", "aria-expanded": "false" },
-      user.avatar_url ? h("img", { class: "avatar", src: `${user.avatar_url}&s=56`, alt: "" }) : null,
+      user.avatar_url ? h("img", { class: "avatar", src: avatarSrc(user.avatar_url, 56), alt: "" }) : null,
       h("span", { class: "who" }, `@${user.login}`),
       svg("M6 9l6 6 6-6")
     );
@@ -1048,7 +1053,11 @@
         h("p", { class: "fine" }, "GitHub only keeps the last 14 days of traffic, so your history starts there and grows from today.")
       );
       await sleep(4000);
-      state.me = await fetchMe();
+      try {
+        state.me = await fetchMe();
+      } catch {
+        await sleep(6000); // network blip or server restart: keep waiting instead of freezing
+      }
       if (!state.me) return (location.href = "/");
       return startOwner();
     }
@@ -1136,7 +1145,7 @@
     const p = state.profile;
     const mine = state.me && state.me.user.login.toLowerCase() === p.login.toLowerCase();
     head.replaceChildren(
-      p.avatar_url ? h("img", { src: `${p.avatar_url}${p.avatar_url.includes("?") ? "&" : "?"}s=128`, alt: "" }) : h("span"),
+      p.avatar_url ? h("img", { src: avatarSrc(p.avatar_url, 128), alt: "" }) : h("span"),
       h("h1", {}, p.name || p.login),
       h(
         "div",
@@ -1416,7 +1425,7 @@
     const ctrl = new AbortController();
     inflight = ctrl;
 
-    const qs = new URLSearchParams({ start: f.start, end: f.end });
+    const qs = new URLSearchParams({ start: f.start, end: f.queryEnd });
     if (!f.useAll) f.repos.forEach((r) => qs.append("repo", r));
     const url = state.mode === "owner" ? `/api/data?${qs}` : `/api/public/${encodeURIComponent(state.login)}/data?${qs}`;
 

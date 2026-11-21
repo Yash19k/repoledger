@@ -5,9 +5,19 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
 
+# The job only reads the repo; it needs no write access to anything on GitHub.
+permissions:
+  contents: read
+
+# Never run two collections at once (a slow run could overlap the next schedule).
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
 jobs:
   collect:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4

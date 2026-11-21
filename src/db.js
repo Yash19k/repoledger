@@ -103,18 +103,33 @@ function upsertClones(repo, rows) {
   );
 }
 
+/**
+ * Referrers, popular paths and contributors are point-in-time lists. Replace the repo's previous list so
+ * entries that dropped out don't linger and the tables don't grow on every collection.
+ */
+function replaceSnapshot(table, columns, repo, rows) {
+  return withTransaction(async (c) => {
+    await c.query(`DELETE FROM ${table} WHERE repo = $1`, [repo]);
+    if (!rows.length) return;
+    const { clause, params } = values(rows);
+    await c.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES ${clause}`, params);
+  });
+}
+
 function upsertReferrers(repo, rows) {
-  return insertMany(
-    "INSERT INTO referrers (repo, referrer, total_count, unique_count)",
-    "",
+  return replaceSnapshot(
+    "referrers",
+    ["repo", "referrer", "total_count", "unique_count"],
+    repo,
     rows.map((r) => [repo, r.referrer, r.total, r.uniques])
   );
 }
 
 function upsertPopularPaths(repo, rows) {
-  return insertMany(
-    "INSERT INTO popular_paths (repo, path, total_count, unique_count)",
-    "",
+  return replaceSnapshot(
+    "popular_paths",
+    ["repo", "path", "total_count", "unique_count"],
+    repo,
     rows.map((r) => [repo, r.path, r.total, r.uniques])
   );
 }
@@ -131,9 +146,10 @@ function upsertCommitActivity(repo, rows) {
 }
 
 function upsertContributors(repo, rows) {
-  return insertMany(
-    "INSERT INTO contributors (repo, author, total_commits)",
-    "",
+  return replaceSnapshot(
+    "contributors",
+    ["repo", "author", "total_commits"],
+    repo,
     rows.map((r) => [repo, r.author, r.total])
   );
 }
@@ -224,29 +240,20 @@ const getIssuePrStats = (repos, start, end) =>
     [repos, start, end]
   );
 
-const getReferrers = (repos) =>
-  fetchAll(
-    `SELECT DISTINCT ON (repo, referrer) repo, referrer, total_count, unique_count, collected_at
-     FROM referrers WHERE repo = ANY($1)
-     ORDER BY repo, referrer, collected_at DESC`,
-    [repos]
-  );
+/**
+ * Rows from each repo's most recent collection only. Older versions appended a new list on every run,
+ * so this also hides entries that have since dropped out.
+ */
+const latestSnapshot = (table, key, cols) =>
+  `SELECT DISTINCT ON (t.repo, t.${key}) t.repo, t.${key}, ${cols.map((c) => `t.${c}`).join(", ")}, t.collected_at
+   FROM ${table} t
+   WHERE t.repo = ANY($1)
+     AND t.collected_at >= (SELECT MAX(x.collected_at) FROM ${table} x WHERE x.repo = t.repo) - INTERVAL '1 minute'
+   ORDER BY t.repo, t.${key}, t.collected_at DESC`;
 
-const getPopularPaths = (repos) =>
-  fetchAll(
-    `SELECT DISTINCT ON (repo, path) repo, path, total_count, unique_count, collected_at
-     FROM popular_paths WHERE repo = ANY($1)
-     ORDER BY repo, path, collected_at DESC`,
-    [repos]
-  );
-
-const getContributors = (repos) =>
-  fetchAll(
-    `SELECT DISTINCT ON (repo, author) repo, author, total_commits, collected_at
-     FROM contributors WHERE repo = ANY($1)
-     ORDER BY repo, author, collected_at DESC`,
-    [repos]
-  );
+const getReferrers = (repos) => fetchAll(latestSnapshot("referrers", "referrer", ["total_count", "unique_count"]), [repos]);
+const getPopularPaths = (repos) => fetchAll(latestSnapshot("popular_paths", "path", ["total_count", "unique_count"]), [repos]);
+const getContributors = (repos) => fetchAll(latestSnapshot("contributors", "author", ["total_commits"]), [repos]);
 
 // ---------------------------------------------------------------------------
 // Users & sessions
@@ -432,7 +439,11 @@ const touchProfile = (login) =>
 
 async function profileRepos(login) {
   return fetchAll(
-    "SELECT repo, description, stars, pushed_at FROM profile_repos WHERE login = $1 ORDER BY repo",
+    // Never show a repo its owner's installation reports as private (e.g. made private after it was cached).
+    `SELECT pr.repo, pr.description, pr.stars, pr.pushed_at FROM profile_repos pr
+     WHERE pr.login = $1
+       AND NOT EXISTS (SELECT 1 FROM installation_repos ir WHERE ir.repo = pr.repo AND ir.private)
+     ORDER BY pr.repo`,
     [login.toLowerCase()]
   );
 }

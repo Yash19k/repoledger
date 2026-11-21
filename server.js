@@ -70,10 +70,14 @@ function limiter(limit, windowMs) {
       e = { count: 0, reset: now + windowMs };
       hits.set(key, e);
     }
-    if (hits.size > 50000) hits.clear();
     e.count++;
     return e.count <= limit ? 0 : Math.ceil((e.reset - now) / 1000);
   }
+  // Drop expired windows so memory stays bounded (clearing everything would reset every client's limit).
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
+  }, Math.min(windowMs, 5 * 60 * 1000)).unref();
   const middleware = (req, res, next) => {
     const retry = allow(req.ip);
     if (!retry) return next();
@@ -140,13 +144,21 @@ function requireUser(req, res, next) {
   res.status(401).json({ error: "Sign in required." });
 }
 
+/** A real calendar date in YYYY-MM-DD form (rejects things like 2026-13-45). */
+function isRealDate(s) {
+  if (!DATE_RE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 function parseRange(req, res) {
-  const { start, end } = req.query;
-  if (!DATE_RE.test(String(start)) || !DATE_RE.test(String(end))) {
-    res.status(400).json({ error: "start and end must be YYYY-MM-DD dates." });
+  const start = String(req.query.start);
+  const end = String(req.query.end);
+  if (!isRealDate(start) || !isRealDate(end)) {
+    res.status(400).json({ error: "start and end must be valid YYYY-MM-DD dates." });
     return null;
   }
-  return { start, end };
+  return start <= end ? { start, end } : { start: end, end: start };
 }
 
 const requestedRepos = (req, allowed) => {
@@ -352,7 +364,10 @@ function createApp() {
           }
         }
       }
-      for (const inst of installs) await db.purgeRepos(await db.deleteInstallation(inst.id));
+      for (const inst of installs) {
+        if (collecting.has(inst.id)) collector.cancel(inst.id);
+        await db.purgeRepos(await db.deleteInstallation(inst.id));
+      }
       await db.deleteUser(req.user.id); // also removes sessions
       res.append("Set-Cookie", cookie(SESSION_COOKIE, "", { maxAge: 0 }));
       res.json({ ok: true });
@@ -444,7 +459,12 @@ function createApp() {
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
+    // Malformed or oversized request bodies are the client's mistake, not a server error.
+    if (err.type === "entity.parse.failed" || err.type === "entity.too.large") {
+      return res.status(err.status || 400).json({ error: "Invalid request body." });
+    }
     console.error(err);
+    if (res.headersSent) return next(err);
     res.status(500).json({ error: "Something went wrong." });
   });
 
