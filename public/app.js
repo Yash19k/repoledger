@@ -3,13 +3,14 @@
   "use strict";
 
   const APP = "RepoLedger";
-  const MONO = '"IBM Plex Mono", ui-monospace, monospace';
+  const MONO = '"Geist Mono", ui-monospace, monospace';
+  const SANS = '"Geist", system-ui, sans-serif';
   const LOGIN_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
   // Series colours per theme. A repo keeps the same colour everywhere.
   const PALETTE = {
-    light: ["#c2410c", "#1d4ed8", "#15803d", "#a21caf", "#a16207", "#0e7490", "#be185d", "#6d28d9", "#4d7c0f", "#57534e"],
-    dark: ["#fb8a4c", "#6ea8fe", "#4ade80", "#e879f9", "#facc15", "#22d3ee", "#f472b6", "#a78bfa", "#a3e635", "#a8a29e"],
+    light: ["#2563eb", "#d97706", "#059669", "#db2777", "#7c3aed", "#0891b2", "#ea580c", "#65a30d", "#e11d48", "#64748b"],
+    dark: ["#60a5fa", "#fbbf24", "#34d399", "#f472b6", "#a78bfa", "#22d3ee", "#fb923c", "#a3e635", "#fb7185", "#94a3b8"],
   };
 
   // -------------------------------------------------------------------------
@@ -216,36 +217,33 @@
   // -------------------------------------------------------------------------
 
   function layout({ xDate = true, barmode, tickangle } = {}) {
-    const ink = cssVar("--ink");
-    const rule = cssVar("--rule");
-    const ruleStrong = cssVar("--rule-strong");
+    const ink = cssVar("--text");
+    const rule = cssVar("--border");
+    const ruleStrong = cssVar("--border-strong");
     return {
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(0,0,0,0)",
-      font: { family: MONO, size: 11, color: cssVar("--ink-3") },
+      font: { family: SANS, size: 11, color: cssVar("--text-3") },
       margin: { t: 10, r: 6, b: 8, l: 6 },
       showlegend: false,
       hovermode: "closest",
-      hoverlabel: { bgcolor: cssVar("--sheet"), bordercolor: ink, font: { family: MONO, size: 12, color: ink }, align: "left" },
+      hoverlabel: { bgcolor: cssVar("--surface"), bordercolor: ruleStrong, font: { family: SANS, size: 12, color: ink }, align: "left" },
       xaxis: {
         type: xDate ? "date" : "category",
         tickformat: xDate ? "%b %d" : undefined,
         showgrid: false,
         zeroline: false,
         showline: true,
-        linecolor: ruleStrong,
-        ticks: "outside",
-        tickcolor: ruleStrong,
-        ticklen: 4,
+        linecolor: rule,
+        ticks: "",
         automargin: true,
         fixedrange: true,
         ...(tickangle != null ? { tickangle } : {}),
       },
       yaxis: {
         gridcolor: rule,
-        griddash: "dot",
         zeroline: true,
-        zerolinecolor: ruleStrong,
+        zerolinecolor: rule,
         showline: false,
         tickformat: ",~r",
         automargin: true,
@@ -271,8 +269,8 @@
         name: repo,
         x: rr.map((r) => r[x]),
         y: rr.map((r) => r[s.key]),
-        line: { color, width: 1.75, dash: s.dash || "solid", shape: s.shape || "linear" },
-        marker: { color, size: 7, symbol: s.dash ? "circle-open" : "circle" },
+        line: { color, width: 2, dash: s.dash || "solid", shape: s.shape || "linear" },
+        marker: { color, size: 6, symbol: s.dash ? "circle-open" : "circle" },
         hovertemplate: `<b>${escapeHtml(shortName(repo))}</b><br>%{x|%b %d, %Y}<br>${escapeHtml(s.label)}: %{y:,}<extra></extra>`,
       }));
     });
@@ -323,11 +321,9 @@
   // Section building blocks
   // -------------------------------------------------------------------------
 
-  let ctx = { no: "01", fig: 0 }; // numbering for the section being rendered
-
   function sheetHead(sheet, title, lede) {
     sheet.append(
-      h("header", { class: "sheet-head" }, h("span", { class: "sheet-no" }, ctx.no), h("h2", {}, title), lede ? h("p", {}, lede) : null)
+      h("header", { class: "sheet-head" }, h("h2", {}, title), lede ? h("p", {}, lede) : null)
     );
   }
 
@@ -397,7 +393,6 @@
   }
 
   function figure(grid, { title, unit, wide, traces, opts }) {
-    ctx.fig += 1;
     const plot = h("div", { class: "plot" });
     grid.append(
       h(
@@ -406,7 +401,6 @@
         h(
           "figcaption",
           {},
-          h("span", { class: "fig-no" }, `Fig. ${Number(ctx.no)}.${ctx.fig}`),
           h("span", { class: "fig-title" }, title),
           unit ? h("span", { class: "fig-unit" }, unit) : null
         ),
@@ -670,7 +664,7 @@
   function renderMastheadActions() {
     const root = $("masthead-actions");
     if (!state.me) {
-      root.replaceChildren(h("a", { class: "outline-btn signin-btn", href: "/auth/login" }, "Sign in with GitHub"));
+      root.replaceChildren(h("a", { class: "btn btn-primary btn-sm", href: "/auth/login" }, "Sign in with GitHub"));
       return;
     }
     const { user, installations, install_url } = state.me;
@@ -785,6 +779,7 @@
       }
       label();
       picker.redraw();
+      renderDemo();
       if (state.data) rerenderActive(true);
     });
   }
@@ -795,6 +790,7 @@
 
   function showOnly(id) {
     for (const v of ["landing", "onboard", "dashboard"]) $(v).hidden = v !== id;
+    $("nav-links").hidden = id !== "landing";
     $("boot").hidden = true;
     $("masthead").hidden = false;
     $("colophon").hidden = false;
@@ -808,8 +804,132 @@
     deleted: "Your data has been deleted and RepoLedger was uninstalled from your GitHub account.",
   };
 
+  // -------------------------------------------------------------------------
+  // Landing demo: what GitHub keeps (14 days) vs what RepoLedger keeps
+  // -------------------------------------------------------------------------
+
+  const demo = { mode: "ledger", data: null };
+
+  function demoData() {
+    if (demo.data) return demo.data;
+    let seed = 7;
+    const rand = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const DAYS = 120;
+    const SPIKE = 41; // days ago: well outside GitHub's 14-day window
+    const rows = [];
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = addDays(today(), -i);
+      const weekend = d.getDay() === 0 || d.getDay() === 6;
+      let v = (120 + (DAYS - i) * 0.9) * (weekend ? 0.6 : 1) * (0.82 + rand() * 0.36);
+      const since = SPIKE - i;
+      if (since >= 0 && since < 6) v += 1250 * Math.pow(0.42, since);
+      const views = Math.round(v);
+      rows.push({
+        date: isoDate(d),
+        views,
+        unique: Math.round(views * (0.34 + rand() * 0.08)),
+        clones: Math.round(views * (0.09 + rand() * 0.05)),
+        hn: since >= 0 && since < 6,
+      });
+    }
+    const spike = rows.reduce((a, b) => (b.views > a.views ? b : a));
+    demo.data = { rows, spike, cutoff: rows[rows.length - 14].date };
+    return demo.data;
+  }
+
+  function renderDemo() {
+    const plot = $("demo-plot");
+    if (!plot || $("landing").hidden) return;
+    const { rows, spike, cutoff } = demoData();
+    const ledgerMode = demo.mode === "ledger";
+    const shown = ledgerMode ? rows : rows.filter((r) => r.date >= cutoff);
+    const lost = rows.filter((r) => r.date <= cutoff);
+    const accent = cssVar("--accent");
+    const lostColor = cssVar("--lost");
+
+    $("demo-toggle").querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === demo.mode)));
+
+    const stat = (label, value, note, cls) =>
+      h("div", {}, h("dt", {}, label), h("dd", { class: cls || null }, value, note ? h("small", { class: note.cls || null }, note.text) : null));
+    $("demo-stats").replaceChildren(
+      stat("Views", fmt(sum(shown, "views")), { text: ledgerMode ? `${rows.length} days` : "14 days" }),
+      stat("Unique visitors", fmt(sum(shown, "unique"))),
+      stat("Clones", fmt(sum(shown, "clones"))),
+      stat("Top referrer", ledgerMode ? "Hacker News" : "github.com", null, ledgerMode ? null : "muted")
+    );
+
+    const spikeDay = prettyDate(spike.date).replace(/, \d{4}$/, "");
+    const caption = $("demo-caption");
+    caption.replaceChildren(
+      ...(ledgerMode
+        ? [h("strong", {}, `${spikeDay}: ${fmt(spike.views)} views`), " from a Hacker News post. Still here, months later."]
+        : [h("strong", {}, "Everything before the last 14 days is gone,"), ` including the ${fmt(spike.views)}-view spike on ${spikeDay}.`])
+    );
+
+    const lay = layout();
+    lay.margin = { t: 8, r: 4, b: 4, l: 4 };
+    lay.hovermode = "x";
+    lay.xaxis.range = [rows[0].date, rows[rows.length - 1].date];
+    lay.yaxis.range = [0, spike.views * 1.12];
+    lay.yaxis.rangemode = undefined;
+    const traces = [];
+    if (!ledgerMode) {
+      lay.shapes = [
+        { type: "rect", xref: "x", yref: "paper", x0: rows[0].date, x1: cutoff, y0: 0, y1: 1, fillcolor: lostColor, opacity: 0.12, line: { width: 0 }, layer: "below" },
+      ];
+      lay.annotations = [
+        { xref: "x", yref: "paper", x: lost[Math.floor(lost.length / 2)].date, y: 0.55, text: "Deleted by GitHub", showarrow: false, font: { family: SANS, size: 13, color: cssVar("--text-3") } },
+      ];
+      traces.push({
+        type: "scatter", mode: "lines", x: lost.map((r) => r.date), y: lost.map((r) => r.views),
+        line: { color: lostColor, width: 1.5, dash: "dot" }, opacity: 0.5, hoverinfo: "skip",
+      });
+    } else {
+      lay.annotations = [
+        {
+          x: spike.date, y: spike.views, xref: "x", yref: "y", text: plot.clientWidth < 560 ? "← Hacker News" : "← Posted on Hacker News", showarrow: false, xanchor: "left", xshift: 10,
+          font: { family: SANS, size: 12, color: cssVar("--text-2") },
+        },
+      ];
+    }
+    traces.push({
+      type: "scatter", mode: "lines", x: shown.map((r) => r.date), y: shown.map((r) => r.views),
+      line: { color: accent, width: 2, shape: "spline", smoothing: 0.4 },
+      fill: "tozeroy", fillcolor: theme() === "dark" ? "rgba(59,130,246,0.14)" : "rgba(37,99,235,0.08)",
+      hovertemplate: "%{x|%b %d}<br><b>%{y:,} views</b><extra></extra>",
+    });
+    Plotly.react(plot, traces, lay, PLOT_CONFIG);
+  }
+
+  function wireDemo() {
+    const toggle = $("demo-toggle");
+    toggle.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-mode]");
+      if (!b || b.dataset.mode === demo.mode) return;
+      demo.mode = b.dataset.mode;
+      renderDemo();
+    });
+    toggle.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      demo.mode = demo.mode === "ledger" ? "github" : "ledger";
+      renderDemo();
+      toggle.querySelector(`[data-mode="${demo.mode}"]`).focus();
+    });
+    $("cta-lookup").addEventListener("click", (e) => {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      $("lookup-input").focus({ preventScroll: true });
+    });
+  }
+
   function showLanding() {
     showOnly("landing");
+    renderDemo();
     document.title = APP;
     const params = new URLSearchParams(location.search);
     const code = params.get("error") || params.get("notice");
@@ -896,7 +1016,7 @@
         h(
           "div",
           { class: "actions" },
-          me.install_url ? h("a", { class: "solid-btn", href: me.install_url }, "Choose repositories on GitHub") : null,
+          me.install_url ? h("a", { class: "btn btn-primary", href: me.install_url }, "Choose repositories on GitHub") : null,
           h("a", { class: "text-btn", href: `/u/${encodeURIComponent(login)}` }, "See your public profile instead")
         ),
         h(
@@ -913,7 +1033,7 @@
       return onboard(
         h("h1", {}, "RepoLedger is suspended on your account."),
         h("p", {}, "Unsuspend it in your GitHub settings to resume collecting."),
-        h("div", { class: "actions" }, h("a", { class: "solid-btn", href: me.installations[0].manage_url, target: "_blank", rel: "noopener" }, "Open GitHub settings ↗"))
+        h("div", { class: "actions" }, h("a", { class: "btn btn-primary", href: me.installations[0].manage_url, target: "_blank", rel: "noopener" }, "Open GitHub settings ↗"))
       );
     }
 
@@ -950,7 +1070,7 @@
           "button",
           {
             type: "button",
-            class: "solid-btn",
+            class: "btn btn-primary",
             onclick: async () => {
               await collectNow();
               state.me = await fetchMe();
@@ -981,7 +1101,7 @@
         return onboard(
           h("h1", {}, `Couldn't look up @${login}.`),
           h("p", {}, e.message),
-          h("div", { class: "actions" }, h("button", { type: "button", class: "solid-btn", onclick: () => startPublic(login) }, "Try again"))
+          h("div", { class: "actions" }, h("button", { type: "button", class: "btn btn-primary", onclick: () => startPublic(login) }, "Try again"))
         );
       }
       if (res.status === "ready") {
@@ -1003,7 +1123,7 @@
     onboard(
       h("h1", {}, message || `No GitHub user called @${login}.`),
       h("p", {}, "Check the spelling and try again."),
-      h("div", { class: "actions" }, h("a", { class: "solid-btn", href: "/" }, "Look up someone else"))
+      h("div", { class: "actions" }, h("a", { class: "btn btn-primary", href: "/" }, "Look up someone else"))
     );
   }
 
@@ -1237,7 +1357,7 @@
   function buildIndex() {
     const ids = sectionIds();
     $("tabs").replaceChildren(
-      ...ids.map((id, i) =>
+      ...ids.map((id) =>
         h(
           "button",
           {
@@ -1248,7 +1368,6 @@
             "aria-selected": String(id === state.active),
             onclick: () => selectSection(id),
           },
-          h("span", { class: "n" }, pad(i + 1)),
           SECTIONS[id].label
         )
       )
@@ -1276,7 +1395,6 @@
     if (!sheet) return;
     sheet.querySelectorAll(".js-plotly-plot").forEach((p) => Plotly.purge(p));
     sheet.replaceChildren();
-    ctx = { no: pad(sectionIds().indexOf(id) + 1), fig: 0 };
     SECTIONS[id].render(sheet, state.data);
     state.rendered.add(id);
   }
@@ -1328,6 +1446,7 @@
   async function init() {
     wireTheme();
     wireLookupForm();
+    wireDemo();
     wireDeleteDialog();
 
     try {
