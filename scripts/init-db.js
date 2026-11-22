@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS installations (
     id BIGINT PRIMARY KEY,
@@ -152,14 +153,21 @@ CREATE TABLE IF NOT EXISTS profile_repos (
 CREATE INDEX IF NOT EXISTS profile_repos_repo_idx ON profile_repos(repo);
 `;
 
-(async () => {
-  try {
-    await db.getPool().query(SCHEMA);
-    console.log("Database schema is up to date.");
-  } catch (e) {
-    console.error("Schema update failed:", e.message);
-    process.exitCode = 1;
-  } finally {
-    await db.closePool();
-  }
-})();
+/** Create or update the schema. */
+const migrate = () => db.getPool().query(SCHEMA);
+
+module.exports = { SCHEMA, migrate };
+
+if (require.main === module) {
+  (async () => {
+    try {
+      await migrate();
+      console.log("Database schema is up to date.");
+    } catch (e) {
+      console.error("Schema update failed:", e.message);
+      process.exitCode = 1;
+    } finally {
+      await db.closePool();
+    }
+  })();
+}

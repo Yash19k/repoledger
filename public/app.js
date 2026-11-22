@@ -632,6 +632,30 @@
         ]);
       },
     },
+    pages: {
+      label: "Pages",
+      render(sheet, data) {
+        sheetHead(
+          sheet,
+          "Popular pages",
+          "The most viewed pages in each repository over GitHub's last 14 days. Shows the latest snapshot for each repository, whatever period is selected."
+        );
+        if (!data.paths.length) return emptyState(sheet);
+        // GitHub reports paths as /owner/repo/...; drop the repository part, which the first column already shows.
+        const rows = sortBy(data.paths, "total_count", true).map((r) => {
+          const prefix = `/${r.repo}`;
+          const rest = r.path.toLowerCase().startsWith(prefix.toLowerCase()) ? r.path.slice(prefix.length) : r.path;
+          return { ...r, page: rest || "/" };
+        });
+        ledger(sheet, [["Views", sum(rows, "total_count")], ["Unique visitors", sum(rows, "unique_count")]], "Across the pages listed below.");
+        table(sheet, rows, [
+          { key: "repo", label: "Repository", repo: true },
+          { key: "page", label: "Page" },
+          { key: "total_count", label: "Views", num: true },
+          { key: "unique_count", label: "Unique", num: true },
+        ]);
+      },
+    },
     contributors: {
       label: "Contributors",
       render(sheet, data) {
@@ -657,7 +681,7 @@
   };
 
   const SECTION_ORDER = {
-    owner: ["traffic", "clones", "commits", "issues", "stars", "referrers", "contributors"],
+    owner: ["traffic", "clones", "commits", "issues", "stars", "referrers", "pages", "contributors"],
     public: ["stars", "commits", "issues", "contributors"],
   };
   const sectionIds = () => SECTION_ORDER[state.mode];
@@ -1082,7 +1106,8 @@
             class: "btn btn-primary",
             onclick: async () => {
               await collectNow();
-              state.me = await fetchMe();
+              state.me = await fetchMe().catch(() => state.me);
+              if (!state.me) return (location.href = "/");
               startOwner();
             },
           },
@@ -1107,6 +1132,17 @@
       } catch (e) {
         if (e.status === 404) return publicNotFound(login);
         if (e.status === 400) return publicNotFound(login, "That isn't a valid GitHub username.");
+        if (e.status === 503 && e.body && e.body.status === "busy") {
+          // Every lookup slot is taken: wait in line instead of showing an error.
+          onboard(
+            h("p", { class: "eyebrow" }, "Public lookup"),
+            h("h1", {}, "Waiting for a free slot."),
+            h("p", {}, `A few other lookups are running. Reading @${login}'s repositories starts automatically in a moment, so keep this page open.`),
+            ...meter(0, 0)
+          );
+          await sleep(5000);
+          continue;
+        }
         return onboard(
           h("h1", {}, `Couldn't look up @${login}.`),
           h("p", {}, e.message),
@@ -1254,6 +1290,10 @@
       const q = search.value.trim().toLowerCase();
       const items = state.sortedRepos.filter((r) => r.toLowerCase().includes(q));
       const on = new Set(effective());
+      // Redrawing replaces the checkbox that has focus; remember it so keyboard users (and Escape) keep working.
+      const focused = list.contains(document.activeElement) ? document.activeElement : null;
+      const focusedRepo = focused ? focused.closest(".picker-item")?.title : null;
+      const focusedOnly = !!(focused && focused.classList.contains("only"));
       list.replaceChildren(
         ...(items.length
           ? items.map((repo) =>
@@ -1279,6 +1319,13 @@
             )
           : [h("li", { class: "picker-empty" }, "No matching repositories")])
       );
+      if (focusedRepo) {
+        const item = [...list.querySelectorAll(".picker-item")].find((el) => el.title === focusedRepo);
+        const target = item && item.querySelector(focusedOnly ? ".only" : "input");
+        (target || search).focus();
+      } else if (focused) {
+        search.focus();
+      }
     }
 
     function open() {
@@ -1414,7 +1461,7 @@
     renderActive();
   }
 
-  const EMPTY_DATA = { views: [], clones: [], commits: [], issues: [], stars: [], referrers: [], contributors: [] };
+  const EMPTY_DATA = { views: [], clones: [], commits: [], issues: [], stars: [], referrers: [], paths: [], contributors: [] };
 
   let inflight = null;
   async function refresh() {
@@ -1471,7 +1518,15 @@
     renderMastheadActions();
 
     const m = location.pathname.match(/^\/u\/([^/]+)\/?$/);
-    if (m) return startPublic(decodeURIComponent(m[1]));
+    if (m) {
+      let login = m[1];
+      try {
+        login = decodeURIComponent(login);
+      } catch {
+        /* malformed escape such as /u/%E0: startPublic reports it as an invalid username */
+      }
+      return startPublic(login);
+    }
     if (!state.me) return showLanding();
     return startOwner();
   }

@@ -8,9 +8,13 @@
  *     npm start
  */
 
+const fs = require("fs");
+const net = require("net");
 const path = require("path");
+const zlib = require("zlib");
 const crypto = require("crypto");
 const express = require("express");
+const compression = require("compression");
 const config = require("./src/config");
 const db = require("./src/db");
 const github = require("./src/github");
@@ -23,6 +27,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SECURE = config.PUBLIC_URL.startsWith("https://");
 const PUBLIC_ORIGIN = new URL(config.PUBLIC_URL).origin;
 const MANUAL_COLLECT_COOLDOWN_MS = 10 * 60 * 1000;
+const MAX_LIMITER_KEYS = 100000;
 
 const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
@@ -60,13 +65,30 @@ function safeEqual(a, b) {
 /** Wrap async handlers so rejected promises reach the error handler. */
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-/** Fixed-window limiter keyed by client IP. */
+/**
+ * Rate-limit key for a client: its IPv4 address, or its IPv6 /56 network. One customer or VM usually gets a whole
+ * IPv6 block, so keying by full address would let anyone dodge the limits by rotating addresses.
+ */
+function clientKey(ip = "") {
+  if (ip.startsWith("::ffff:") && net.isIPv4(ip.slice(7))) return ip.slice(7);
+  if (!net.isIPv6(ip)) return ip;
+  const [head, tail] = ip.split("%")[0].split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const fill = tail === undefined ? [] : Array(Math.max(0, 8 - left.length - right.length)).fill("0");
+  const g = [...left, ...fill, ...right].map((x) => parseInt(x, 16) || 0);
+  return `${g[0].toString(16)}:${g[1].toString(16)}:${g[2].toString(16)}:${(g[3] & 0xff00).toString(16)}::/56`;
+}
+
+/** Fixed-window limiter. Keys are client networks (see clientKey) unless the caller passes its own. */
 function limiter(limit, windowMs) {
   const hits = new Map();
   function allow(key) {
     const now = Date.now();
     let e = hits.get(key);
     if (!e || e.reset < now) {
+      // Hard cap on memory: under a flood of new keys, forget the oldest window first.
+      if (!e && hits.size >= MAX_LIMITER_KEYS) hits.delete(hits.keys().next().value);
       e = { count: 0, reset: now + windowMs };
       hits.set(key, e);
     }
@@ -79,7 +101,7 @@ function limiter(limit, windowMs) {
     for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
   }, Math.min(windowMs, 5 * 60 * 1000)).unref();
   const middleware = (req, res, next) => {
-    const retry = allow(req.ip);
+    const retry = allow(clientKey(req.ip));
     if (!retry) return next();
     res.set("Retry-After", String(retry));
     res.status(429).json({ error: "Too many requests. Try again shortly." });
@@ -105,8 +127,16 @@ function securityHeaders(req, res, next) {
     "Referrer-Policy": "same-origin",
     "X-Frame-Options": "SAMEORIGIN",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
   });
   if (SECURE) res.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  next();
+}
+
+/** API and sign-in responses hold private data: never let a browser or proxy cache store them. */
+function noStore(req, res, next) {
+  res.set("Cache-Control", "no-store");
   next();
 }
 
@@ -161,10 +191,50 @@ function parseRange(req, res) {
   return start <= end ? { start, end } : { start: end, end: start };
 }
 
+/**
+ * The repos asked for with ?repo=a&repo=b, limited to `allowed` (in `allowed`'s order). Only plain repeated keys
+ * count; bracket forms like repo[x]=y are ignored rather than parsed into objects.
+ */
 const requestedRepos = (req, allowed) => {
-  const requested = [].concat(req.query.repo || []).map(String);
-  return requested.length ? requested.filter((r) => allowed.includes(r)) : allowed;
+  const requested = new URLSearchParams(req.originalUrl.split("?")[1] || "").getAll("repo");
+  if (!requested.length) return allowed;
+  const wanted = new Set(requested);
+  return allowed.filter((r) => wanted.has(r));
 };
+
+// ---------------------------------------------------------------------------
+// Charting library: 5 MB, so it's compressed once (in the background) instead of on every request
+// ---------------------------------------------------------------------------
+
+let plotly = null;
+function plotlyBundle() {
+  if (plotly) return plotly;
+  const raw = fs.readFileSync(require.resolve("plotly.js-strict-dist-min/plotly-strict.min.js"));
+  plotly = { raw, br: null, gzip: null, etag: `W/"${crypto.createHash("sha1").update(raw).digest("base64url")}"` };
+  const brOpts = { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } };
+  zlib.brotliCompress(raw, brOpts, (err, buf) => (err ? console.warn("Brotli failed:", err.message) : (plotly.br = buf)));
+  zlib.gzip(raw, { level: 9 }, (err, buf) => (err ? console.warn("Gzip failed:", err.message) : (plotly.gzip = buf)));
+  return plotly;
+}
+
+function sendPlotly(req, res) {
+  const p = plotlyBundle();
+  res.set({
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "public, max-age=86400",
+    ETag: p.etag,
+    Vary: "Accept-Encoding",
+  });
+  let body = p.raw;
+  if (p.br && req.acceptsEncodings("br") === "br") {
+    body = p.br;
+    res.set("Content-Encoding", "br");
+  } else if (p.gzip && req.acceptsEncodings("gzip") === "gzip") {
+    body = p.gzip;
+    res.set("Content-Encoding", "gzip");
+  }
+  res.send(body); // answers 304 when the browser's copy is current
+}
 
 // ---------------------------------------------------------------------------
 // Background collection for newly installed accounts
@@ -187,13 +257,42 @@ function kickCollection(installationId) {
 function createApp() {
   const app = express();
   app.disable("x-powered-by");
-  if (SECURE) app.set("trust proxy", 1);
+  app.set("trust proxy", config.TRUST_PROXY);
   app.use(securityHeaders);
+  // Responses are compressed on the fly at fast settings: a year of dashboard data is ~4 MB of JSON, and the default
+  // levels cost 3-4x the CPU for a few percent smaller output. The charting library has its own pre-compressed copies.
+  app.use(
+    compression({
+      threshold: 1024,
+      level: 3,
+      brotli: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 3 } },
+      filter: (req, res) => !req.path.startsWith("/vendor/") && compression.filter(req, res),
+    })
+  );
   app.use(express.json({ limit: "10kb" }));
+  app.use(["/api", "/auth"], noStore);
 
   const authLimit = limiter(30, 60 * 1000);
-  const apiLimit = limiter(240, 60 * 1000);
-  const lookupStarts = limiter(20, 60 * 60 * 1000); // new public lookups per IP per hour
+  const apiLimit = limiter(config.RATE_LIMIT_API_PER_MIN, 60 * 1000);
+  const lookupStarts = limiter(config.RATE_LIMIT_LOOKUPS_PER_HOUR, 60 * 60 * 1000); // new public lookups per network
+  const collectKicks = limiter(1, 60 * 1000); // "Collect now" per user
+
+  // ---- Health checks (for load balancers and uptime monitors) ----
+
+  app.get("/healthz", (req, res) => res.set("Cache-Control", "no-store").json({ ok: true }));
+  app.get(
+    "/readyz",
+    apiLimit.middleware,
+    ah(async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        await db.ping();
+        res.json({ ok: true, database: "up" });
+      } catch {
+        res.status(503).json({ ok: false, database: "down" });
+      }
+    })
+  );
 
   // ---- Sign-in ----
 
@@ -240,6 +339,9 @@ function createApp() {
         const sessionToken = crypto.randomBytes(32).toString("base64url");
         const expires = new Date(Date.now() + config.SESSION_DAYS * 86400 * 1000);
         await db.createSession(me.id, sha256(sessionToken), expires);
+        // Signing in again replaces the old session instead of leaving it valid for its remaining 30 days.
+        const previous = readCookie(req, SESSION_COOKIE);
+        if (previous) await db.deleteSession(sha256(previous)).catch(() => {});
         res.append("Set-Cookie", cookie(SESSION_COOKIE, sessionToken, { maxAge: config.SESSION_DAYS * 86400 }));
 
         for (const inst of await db.installationsForUser(me.id)) {
@@ -311,16 +413,17 @@ function createApp() {
       if (!range) return;
       const repos = requestedRepos(req, await db.visibleReposForUser(req.user.id));
       const { start, end } = range;
-      const [views, clones, commits, issues, stars, referrers, contributors] = await Promise.all([
+      const [views, clones, commits, issues, stars, referrers, paths, contributors] = await Promise.all([
         db.getViews(repos, start, end),
         db.getClones(repos, start, end),
         db.getCommitActivity(repos, start, end),
         db.getIssuePrStats(repos, start, end),
         db.getStarStats(repos, start, end),
         db.getReferrers(repos),
+        db.getPopularPaths(repos),
         db.getContributors(repos),
       ]);
-      res.json({ views, clones, commits, issues, stars, referrers, contributors });
+      res.json({ views, clones, commits, issues, stars, referrers, paths, contributors });
     })
   );
 
@@ -337,6 +440,13 @@ function createApp() {
       );
       if (recent && !installs.some((i) => collecting.has(i.id))) {
         return res.status(429).json({ error: "Your data was collected in the last 10 minutes. Try again later." });
+      }
+      // Even when collections keep failing (so there's no "last collected" time), don't let anyone restart them
+      // in a loop: each start spends the app's shared GitHub rate limit.
+      const wait = collectKicks.allow(`user:${req.user.id}`);
+      if (wait) {
+        res.set("Retry-After", String(wait));
+        return res.status(429).json({ error: "A collection was started a moment ago. Try again in a minute." });
       }
       installs.forEach((i) => kickCollection(i.id));
       res.json({ ok: true });
@@ -390,11 +500,14 @@ function createApp() {
         if (job?.state === "not_found") return res.status(404).json({ status: "not_found" });
         if (job?.state === "error" && !cached) return res.status(502).json({ status: "error", error: job.message });
         if (!job) {
-          const retryAfter = lookupStarts.allow(req.ip); // 0 = allowed
-          if (retryAfter === 0) {
-            if (!lookup.start(login) && !cached) {
-              return res.status(503).json({ status: "busy", error: "Lots of lookups right now. Try again in a minute." });
+          if (!lookup.hasCapacity()) {
+            // Checked before the per-network allowance, so waiting for a free slot doesn't use it up.
+            if (!cached) {
+              res.set("Retry-After", "5");
+              return res.status(503).json({ status: "busy", error: "Lots of lookups right now. Waiting for a free slot…" });
             }
+          } else if (lookupStarts.allow(clientKey(req.ip)) === 0) {
+            lookup.start(login);
           } else if (!cached) {
             return res.status(429).json({ status: "limited", error: "Too many lookups from your network. Try again later." });
           }
@@ -451,11 +564,14 @@ function createApp() {
 
   // ---- Static frontend ----
 
-  app.get("/vendor/plotly.min.js", (req, res) => {
-    res.sendFile(require.resolve("plotly.js-strict-dist-min/plotly-strict.min.js"));
-  });
-  app.use(express.static(path.join(__dirname, "public"), { index: "index.html" }));
-  app.get(/^\/u\/[^/]+\/?$/, (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+  // File names aren't versioned, so browsers revalidate (cheap 304s) instead of keeping stale copies.
+  const revalidate = (res) => res.setHeader("Cache-Control", "no-cache");
+  plotlyBundle();
+  app.get("/vendor/plotly.min.js", sendPlotly);
+  app.use(express.static(path.join(__dirname, "public"), { index: "index.html", setHeaders: revalidate }));
+  app.get(/^\/u\/[^/]+\/?$/, (req, res) =>
+    res.sendFile(path.join(__dirname, "public", "index.html"), { headers: { "Cache-Control": "no-cache" } })
+  );
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
@@ -471,19 +587,62 @@ function createApp() {
   return app;
 }
 
-module.exports = { createApp };
+/** Problems worth flagging at startup instead of at the first failed sign-in. */
+function configWarnings() {
+  const warnings = [];
+  if (process.env.NODE_ENV === "production" && !SECURE) {
+    warnings.push("PUBLIC_URL isn't https://. In production, cookies must be Secure: set PUBLIC_URL to your https address.");
+  }
+  if (config.GITHUB_APP_PRIVATE_KEY) {
+    try {
+      crypto.createPrivateKey(config.GITHUB_APP_PRIVATE_KEY);
+    } catch {
+      warnings.push("GITHUB_APP_PRIVATE_KEY isn't a valid PEM private key. Sign-in and collection will fail.");
+    }
+  }
+  if (!config.GITHUB_PUBLIC_TOKEN) {
+    warnings.push("GITHUB_PUBLIC_TOKEN isn't set. GitHub allows 60 lookup requests an hour without it: about one small lookup.");
+  }
+  return warnings;
+}
+
+/** Hourly housekeeping: expired sessions and cached lookups nobody opens any more. */
+async function maintenance() {
+  try {
+    await db.deleteExpiredSessions();
+    const pruned = await db.pruneProfiles(config.PUBLIC_PROFILE_TTL_DAYS, lookup.runningLogins(), config.PUBLIC_MAX_PROFILES);
+    if (pruned) console.log(`Deleted ${pruned} old cached lookup(s).`);
+  } catch (e) {
+    console.warn("Maintenance failed:", e.message);
+  }
+}
+
+module.exports = { createApp, clientKey, configWarnings, maintenance };
 
 if (require.main === module) {
-  const cleanup = () => db.deleteExpiredSessions().catch(() => {});
-  cleanup();
-  setInterval(cleanup, 6 * 3600 * 1000).unref();
+  maintenance();
+  setInterval(maintenance, 3600 * 1000).unref();
 
-  createApp().listen(config.PORT, () => {
+  const server = createApp().listen(config.PORT, () => {
     console.log(`\n  ${config.APP_NAME} is running.\n`);
     console.log(`  Local URL: http://localhost:${config.PORT}`);
     if (!github.isAppConfigured()) {
       console.log("\n  GitHub sign-in is not set up yet. Run `npm run create-app` to create the GitHub App.");
     }
+    for (const w of configWarnings()) console.warn(`\n  Warning: ${w}`);
     console.log("");
   });
+  // Outlive load balancers' idle timeouts (60 s on AWS ALB), so they never reuse a connection Node just closed.
+  server.keepAliveTimeout = 65 * 1000;
+  server.headersTimeout = 66 * 1000;
+
+  // Hosts send SIGTERM before replacing an instance: finish in-flight requests, then close the database pool.
+  const shutdown = (signal) => {
+    console.log(`${signal} received: shutting down.`);
+    server.close(() => db.closePool().finally(() => process.exit(0)));
+    server.closeIdleConnections();
+    setTimeout(() => process.exit(0), 10 * 1000).unref();
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 }

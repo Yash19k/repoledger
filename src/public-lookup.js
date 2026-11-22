@@ -10,9 +10,9 @@ const github = require("./github");
 const { collectRepo } = require("./collect-repo");
 
 const LOGIN_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
-const MAX_CONCURRENT = 3;
 const KEEP_RESULT_MS = 60 * 1000;
-const MIN_RATE_BUDGET = 300;
+// Requests always kept back for sign-ins and other lookups: 10% of the hourly limit, at most 300.
+const MAX_RESERVE = 300;
 
 const jobs = new Map(); // login -> { state, done, total, finishedAt, message }
 
@@ -28,19 +28,36 @@ function status(login) {
   return job || null;
 }
 
-const running = () => [...jobs.values()].filter((j) => j.state === "running").length;
+const runningLogins = () => [...jobs].filter(([, j]) => j.state === "running").map(([login]) => login);
+const running = () => runningLogins().length;
+/** True when another lookup may start now. */
+const hasCapacity = () => running() < config.PUBLIC_LOOKUP_CONCURRENCY;
+
+// Finished jobs are normally dropped when someone asks for them again; sweep the ones nobody asked about.
+setInterval(() => {
+  for (const login of [...jobs.keys()]) status(login);
+}, KEEP_RESULT_MS).unref();
 
 function isStale(profile) {
   if (!profile || !profile.fetched_at) return true;
   return Date.now() - new Date(profile.fetched_at).getTime() > config.PUBLIC_CACHE_HOURS * 3600 * 1000;
 }
 
+/** True when the shared GitHub budget is down to its reserve. */
+function budgetLow() {
+  const limit = github.publicRateLimit();
+  const reserve = limit ? Math.min(MAX_RESERVE, Math.ceil(limit * 0.1)) : MAX_RESERVE;
+  return github.publicRateRemaining() < reserve;
+}
+
+function busyError() {
+  const e = new Error("busy");
+  e.code = "busy";
+  return e;
+}
+
 async function refreshProfile(login, job) {
-  if (github.publicRateRemaining() < MIN_RATE_BUDGET) {
-    const e = new Error("busy");
-    e.code = "busy";
-    throw e;
-  }
+  if (budgetLow()) throw busyError();
   const gh = github.publicClient();
   const user = await gh.json(`/users/${encodeURIComponent(login)}`);
   const all = await gh.paginate(`/users/${encodeURIComponent(login)}/repos?type=owner&sort=pushed&per_page=100`, null, {
@@ -53,9 +70,15 @@ async function refreshProfile(login, job) {
   if (removed.length) await db.purgeRepos(removed);
 
   // A few repos at a time keeps lookups quick without hammering the API.
+  // Stop as soon as the budget runs low: one big account mustn't use up everyone else's lookups.
   let next = 0;
+  let outOfBudget = false;
   async function worker() {
-    while (next < repos.length) {
+    while (next < repos.length && !outOfBudget) {
+      if (budgetLow()) {
+        outOfBudget = true;
+        break;
+      }
       const repo = repos[next++];
       try {
         await collectRepo(gh, repo, { traffic: false });
@@ -66,6 +89,7 @@ async function refreshProfile(login, job) {
     }
   }
   await Promise.all(Array.from({ length: 4 }, worker));
+  if (outOfBudget) throw busyError();
   await db.markProfileFetched(user.login);
 }
 
@@ -73,7 +97,7 @@ async function refreshProfile(login, job) {
 function start(login) {
   const key = login.toLowerCase();
   if (status(key)?.state === "running") return true;
-  if (running() >= MAX_CONCURRENT) return false;
+  if (!hasCapacity()) return false;
   const job = { state: "running", done: 0, total: 0, finishedAt: 0, message: "" };
   jobs.set(key, job);
   refreshProfile(login, job)
@@ -99,4 +123,4 @@ function start(login) {
   return true;
 }
 
-module.exports = { isValidLogin, status, start, isStale };
+module.exports = { isValidLogin, status, start, isStale, hasCapacity, runningLogins, budgetLow };

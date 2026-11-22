@@ -7,15 +7,20 @@ types.setTypeParser(20, (v) => Number(v));
 
 let pool = null;
 
-function sslOption(url) {
+/**
+ * TLS for remote databases. With DATABASE_SSL_CA set (e.g. Supabase's CA certificate) the server's certificate is
+ * verified. Without it the connection is still encrypted but not verified, which is what most hosted Postgres
+ * providers need out of the box. An explicit sslmode in DATABASE_URL always wins.
+ */
+function sslOption(url, ca = config.DATABASE_SSL_CA) {
   if (/[?&]sslmode=/.test(url)) return undefined;
   try {
     const host = new URL(url).hostname;
-    if (["localhost", "127.0.0.1", "::1"].includes(host)) return undefined;
+    if (["localhost", "127.0.0.1", "::1", "[::1]"].includes(host)) return undefined;
   } catch {
     /* fall through */
   }
-  return { rejectUnauthorized: false };
+  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
 }
 
 function getPool() {
@@ -23,8 +28,10 @@ function getPool() {
     pool = new Pool({
       connectionString: config.DATABASE_URL,
       ssl: sslOption(config.DATABASE_URL),
-      max: 5,
+      max: config.PG_POOL_MAX,
       connectionTimeoutMillis: 15000,
+      // A runaway query must not hold a connection forever.
+      statement_timeout: 30000,
     });
     pool.on("error", (e) => console.warn("Idle database client error:", e.message));
   }
@@ -40,6 +47,15 @@ async function closePool() {
 }
 
 const query = (sql, params) => module.exports.getPool().query(sql, params);
+
+/** Readiness check: resolves when the database answers within `ms`. */
+function ping(ms = 3000) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Database did not answer in time")), ms);
+  });
+  return Promise.race([query("SELECT 1"), timeout]).finally(() => clearTimeout(timer));
+}
 
 async function withTransaction(fn) {
   const client = await module.exports.getPool().connect();
@@ -245,7 +261,8 @@ const getIssuePrStats = (repos, start, end) =>
  * so this also hides entries that have since dropped out.
  */
 const latestSnapshot = (table, key, cols) =>
-  `SELECT DISTINCT ON (t.repo, t.${key}) t.repo, t.${key}, ${cols.map((c) => `t.${c}`).join(", ")}, t.collected_at
+  // collected_at only orders the rows; leaving it out of the result saves parsing a timestamp per row.
+  `SELECT DISTINCT ON (t.repo, t.${key}) t.repo, t.${key}, ${cols.map((c) => `t.${c}`).join(", ")}
    FROM ${table} t
    WHERE t.repo = ANY($1)
      AND t.collected_at >= (SELECT MAX(x.collected_at) FROM ${table} x WHERE x.repo = t.repo) - INTERVAL '1 minute'
@@ -308,6 +325,12 @@ async function listInstallationIds() {
   return rows.map((r) => r.id);
 }
 
+/** installation id -> when it was last collected (ms since epoch; 0 if never). */
+async function installationCollectedTimes() {
+  const { rows } = await query("SELECT id, last_collected_at FROM installations");
+  return new Map(rows.map((r) => [r.id, r.last_collected_at ? new Date(r.last_collected_at).getTime() : 0]));
+}
+
 async function installationsForUser(userId) {
   const { rows } = await query(
     `SELECT i.id, i.account_id, i.account_login, i.account_type, i.suspended, i.last_collected_at,
@@ -329,7 +352,12 @@ function replaceInstallationRepos(installationId, repos) {
     await c.query("DELETE FROM installation_repos WHERE installation_id = $1", [installationId]);
     if (repos.length) {
       const { clause, params } = values(repos.map((r) => [installationId, r.repo, !!r.private]));
-      await c.query(`INSERT INTO installation_repos (installation_id, repo, private) VALUES ${clause}`, params);
+      // ON CONFLICT: a scheduled run and a "Collect now" can overlap without failing each other.
+      await c.query(
+        `INSERT INTO installation_repos (installation_id, repo, private) VALUES ${clause}
+         ON CONFLICT (installation_id, repo) DO UPDATE SET private = EXCLUDED.private`,
+        params
+      );
     }
     return removed;
   });
@@ -425,7 +453,12 @@ function replaceProfile(profile, repos) {
       const { clause, params } = values(
         repos.map((r) => [key, r.full_name, r.description, r.stargazers_count, r.pushed_at])
       );
-      await c.query(`INSERT INTO profile_repos (login, repo, description, stars, pushed_at) VALUES ${clause}`, params);
+      await c.query(
+        `INSERT INTO profile_repos (login, repo, description, stars, pushed_at) VALUES ${clause}
+         ON CONFLICT (login, repo) DO UPDATE SET description = EXCLUDED.description, stars = EXCLUDED.stars,
+           pushed_at = EXCLUDED.pushed_at`,
+        params
+      );
     }
     return removed;
   });
@@ -434,8 +467,13 @@ function replaceProfile(profile, repos) {
 const markProfileFetched = (login) =>
   query("UPDATE profiles SET fetched_at = NOW() WHERE login = $1", [login.toLowerCase()]);
 
+/** Record a view. At most one write per profile per hour, so busy profiles don't cost a write per page view. */
 const touchProfile = (login) =>
-  query("UPDATE profiles SET last_viewed_at = NOW() WHERE login = $1", [login.toLowerCase()]);
+  query(
+    `UPDATE profiles SET last_viewed_at = NOW()
+     WHERE login = $1 AND (last_viewed_at IS NULL OR last_viewed_at < NOW() - INTERVAL '1 hour')`,
+    [login.toLowerCase()]
+  );
 
 async function profileRepos(login) {
   return fetchAll(
@@ -458,9 +496,32 @@ function deleteProfile(login) {
   });
 }
 
+/**
+ * Delete cached lookups, and their stats (unless an installation or another lookup still uses them):
+ *   - lookups nobody has opened for `days` days
+ *   - lookups that never finished, except the logins in `skip` (lookups running right now)
+ *   - beyond the `max` most recently opened, so lookups can never fill the database (and starve owners' traffic)
+ * Returns how many profiles were deleted.
+ */
+async function pruneProfiles(days, skip = [], max = null) {
+  const { rows } = await query(
+    `SELECT login FROM profiles
+     WHERE NOT (login = ANY($2::text[]))
+       AND (COALESCE(last_viewed_at, fetched_at) < NOW() - make_interval(days => $1::int)
+            OR (last_viewed_at IS NULL AND fetched_at IS NULL)
+            OR login IN (SELECT login FROM profiles
+                         ORDER BY COALESCE(last_viewed_at, fetched_at) DESC NULLS LAST, login
+                         OFFSET $3::int))`,
+    [days, skip.map((s) => s.toLowerCase()), max ?? 2147483647]
+  );
+  for (const { login } of rows) await purgeRepos(await deleteProfile(login));
+  return rows.length;
+}
+
 module.exports = {
   getPool,
   closePool,
+  ping,
   fetchAll,
   withTransaction,
   TRAFFIC_TABLES,
@@ -491,6 +552,7 @@ module.exports = {
   deleteUser,
   upsertInstallation,
   listInstallationIds,
+  installationCollectedTimes,
   installationsForUser,
   replaceInstallationRepos,
   deleteInstallation,
@@ -504,4 +566,6 @@ module.exports = {
   touchProfile,
   profileRepos,
   deleteProfile,
+  pruneProfiles,
+  sslOption,
 };

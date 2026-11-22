@@ -60,13 +60,18 @@ function parseLink(header) {
   return links;
 }
 
+/** Abort a request that takes too long, so a stuck connection can't hang a lookup, a sign-in or a collection. */
+const timeoutSignal = () => AbortSignal.timeout(config.GITHUB_TIMEOUT_MS);
+
 /**
  * A REST client. `getToken` returns the bearer token (or null for anonymous requests).
- * `onRateLimit` receives the remaining request budget after each call.
+ * `onRateLimit({ remaining, limit, reset })` receives GitHub's rate-limit headers after each call.
  */
 function client(getToken, { onRateLimit } = {}) {
   async function request(pathOrUrl, { method = "GET", body, accept } = {}) {
     const url = pathOrUrl.startsWith("http") ? pathOrUrl : API + pathOrUrl;
+    // Pagination follows URLs from GitHub's Link header. Never send a token anywhere but the API.
+    if (!url.startsWith(`${API}/`)) throw new Error(`Refusing to call a non-GitHub URL: ${url}`);
     const token = await getToken();
     const res = await fetch(url, {
       method,
@@ -78,9 +83,16 @@ function client(getToken, { onRateLimit } = {}) {
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal: timeoutSignal(),
     });
     const remaining = res.headers.get("x-ratelimit-remaining");
-    if (onRateLimit && remaining != null) onRateLimit(Number(remaining));
+    if (onRateLimit && remaining != null) {
+      onRateLimit({
+        remaining: Number(remaining),
+        limit: Number(res.headers.get("x-ratelimit-limit")) || null,
+        reset: Number(res.headers.get("x-ratelimit-reset")) || null,
+      });
+    }
     if (!res.ok) throw new GithubError(res.status, await res.text(), url);
     return res;
   }
@@ -150,10 +162,22 @@ async function uninstall(installationId) {
 
 // ---- Public lookups ----
 
-let publicRemaining = Infinity;
+// The public lookup budget, from GitHub's headers. `reset` is when GitHub refills it (unix seconds).
+const publicRate = { remaining: Infinity, limit: null, reset: null };
 const publicClient = () =>
-  client(async () => config.GITHUB_PUBLIC_TOKEN, { onRateLimit: (n) => (publicRemaining = n) });
-const publicRateRemaining = () => publicRemaining;
+  client(async () => config.GITHUB_PUBLIC_TOKEN, {
+    onRateLimit: ({ remaining, limit, reset }) => Object.assign(publicRate, { remaining, limit, reset }),
+  });
+
+/** Requests left in the current window. Once GitHub's reset time passes, the budget is full again. */
+function publicRateRemaining(now = Date.now()) {
+  if (publicRate.reset && now >= publicRate.reset * 1000) return publicRate.limit || Infinity;
+  return publicRate.remaining;
+}
+/** The hourly limit (60 without a token, 5,000 with one), or null before the first request. */
+const publicRateLimit = () => publicRate.limit;
+/** Test hook. */
+const resetPublicRate = (value = { remaining: Infinity, limit: null, reset: null }) => Object.assign(publicRate, value);
 
 // ---- User sign-in ----
 
@@ -179,6 +203,7 @@ async function exchangeOAuthCode(code) {
       code,
       redirect_uri: callbackUrl(),
     }),
+    signal: timeoutSignal(),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error || !data.access_token) {
@@ -201,6 +226,7 @@ async function revokeUserToken(token) {
       "User-Agent": config.APP_NAME,
     },
     body: JSON.stringify({ access_token: token }),
+    signal: timeoutSignal(),
   });
 }
 
@@ -218,6 +244,8 @@ module.exports = {
   uninstall,
   publicClient,
   publicRateRemaining,
+  publicRateLimit,
+  resetPublicRate,
   authorizeUrl,
   exchangeOAuthCode,
   userClient,

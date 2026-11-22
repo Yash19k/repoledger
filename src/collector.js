@@ -3,6 +3,7 @@
  * Run standalone:  npm run collect
  */
 
+const config = require("./config");
 const db = require("./db");
 const log = require("./log");
 const github = require("./github");
@@ -26,44 +27,58 @@ const cancel = (installationId) => cancelled.add(installationId);
 /** Refresh one installation's repo list and collect stats for each repo. */
 async function syncInstallation(inst) {
   const row = fromApi(inst);
-  await db.upsertInstallation(row);
-  if (row.suspended) {
-    log.info(`Skipping suspended installation ${row.id} (${row.account_login})`);
-    return;
-  }
+  const touched = []; // repos this run may write stats for
+  try {
+    await db.upsertInstallation(row);
+    if (row.suspended) {
+      log.info(`Skipping suspended installation ${row.id} (${row.account_login})`);
+      return;
+    }
 
-  const gh = github.installationClient(row.id);
-  const repos = await gh.paginate("/installation/repositories?per_page=100", "repositories");
-  const removed = await db.replaceInstallationRepos(
-    row.id,
-    repos.map((r) => ({ repo: r.full_name, private: r.private }))
-  );
-  if (removed.length) {
-    log.info(`  ${removed.length} repo(s) removed from installation ${row.id}; deleting their stats`);
-    await db.purgeRepos(removed);
-  }
+    const gh = github.installationClient(row.id);
+    const repos = await gh.paginate("/installation/repositories?per_page=100", "repositories");
+    touched.push(...repos.map((r) => r.full_name));
+    const removed = await db.replaceInstallationRepos(
+      row.id,
+      repos.map((r) => ({ repo: r.full_name, private: r.private }))
+    );
+    if (removed.length) {
+      log.info(`  ${removed.length} repo(s) removed from installation ${row.id}; deleting their stats`);
+      await db.purgeRepos(removed);
+    }
 
-  log.info(`Installation ${row.id} (${row.account_login}): ${repos.length} repos`);
-  for (const repo of repos) {
-    if (cancelled.has(row.id)) break;
-    try {
-      await collectRepo(gh, repo, { traffic: true });
-    } catch (e) {
-      log.error(`Unexpected error collecting ${repo.full_name}: ${e.message}`);
+    log.info(`Installation ${row.id} (${row.account_login}): ${repos.length} repos`);
+    for (const repo of repos) {
+      if (cancelled.has(row.id)) break;
+      try {
+        await collectRepo(gh, repo, { traffic: true });
+      } catch (e) {
+        log.error(`Unexpected error collecting ${repo.full_name}: ${e.message}`);
+      }
+    }
+    if (!cancelled.has(row.id)) await db.markInstallationCollected(row.id);
+  } finally {
+    if (cancelled.delete(row.id)) {
+      // The owner deleted their data mid-run. This run may have re-created the installation row or written stats
+      // after the delete, so remove everything it could have touched, even if the run failed part-way.
+      const covered = await db.deleteInstallation(row.id);
+      await db.purgeRepos([...new Set([...covered, ...touched])]);
     }
   }
-  if (cancelled.has(row.id)) {
-    // The owner deleted their data mid-run: remove anything this run wrote after that.
-    cancelled.delete(row.id);
-    await db.purgeRepos(repos.map((r) => r.full_name));
-    return;
-  }
-  await db.markInstallationCollected(row.id);
 }
 
 async function collectInstallationById(installationId) {
   const inst = await github.appClient().json(`/app/installations/${installationId}`);
   await syncInstallation(inst);
+}
+
+/** Run `fn` over `items` with at most `limit` running at once. */
+async function eachLimit(items, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 async function run() {
@@ -79,17 +94,22 @@ async function run() {
     await db.purgeRepos(repos);
   }
 
-  for (const inst of installs) {
+  // Least recently collected first: if a run is cut short, the next one starts with whoever was skipped.
+  const lastCollected = await db.installationCollectedTimes();
+  installs.sort((a, b) => (lastCollected.get(a.id) || 0) - (lastCollected.get(b.id) || 0));
+
+  // Every installation has its own GitHub rate limit, so several can be collected at once.
+  await eachLimit(installs, config.COLLECT_CONCURRENCY, async (inst) => {
     try {
       await syncInstallation(inst);
     } catch (e) {
       log.error(`Installation ${inst.id} (${inst.account?.login}) failed: ${e.message}`);
     }
-  }
+  });
   log.info("Collection complete.");
 }
 
-module.exports = { run, collectInstallationById, syncInstallation, cancel };
+module.exports = { run, collectInstallationById, syncInstallation, cancel, eachLimit };
 
 if (require.main === module) {
   run()

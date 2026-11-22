@@ -1,0 +1,11 @@
+# Secrets never go into the image: pass them as environment variables.
+.env
+.env.*
+!.env.example
+
+node_modules
+.git
+.github
+tests
+*.log
+*.md
