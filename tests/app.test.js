@@ -112,6 +112,44 @@ test("landing page and public profile URLs serve the app with security headers",
   });
 });
 
+test("the how-it-works and deploy pages have clean URLs and revalidate", async () => {
+  await withServer(async (base) => {
+    for (const [url, text] of [
+      ["/how-it-works", /What happens between GitHub and your dashboard/],
+      ["/how-it-works/", /What happens between GitHub and your dashboard/],
+      ["/deploy", /Deploy RepoLedger on AWS/],
+      ["/deploy/", /Deploy RepoLedger on AWS/],
+    ]) {
+      const res = await fetch(base + url);
+      assert.equal(res.status, 200, url);
+      assert.match(res.headers.get("content-type"), /text\/html/);
+      assert.equal(res.headers.get("cache-control"), "no-cache");
+      assert.match(res.headers.get("content-security-policy"), /script-src 'self'/);
+      assert.match(await res.text(), text);
+    }
+    assert.equal((await fetch(base + "/how-it-works/extra")).status, 404);
+  });
+});
+
+test("pages only load scripts from files, as the Content-Security-Policy requires", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const dir = path.join(__dirname, "..", "public");
+  const pages = fs.readdirSync(dir).filter((f) => f.endsWith(".html"));
+  assert.ok(pages.length >= 3);
+  for (const page of pages) {
+    const html = fs.readFileSync(path.join(dir, page), "utf8");
+    assert.doesNotMatch(html, /<script(?![^>]*\ssrc=)[^>]*>/i, `${page} has an inline script`);
+    assert.doesNotMatch(html, /\son[a-z]+\s*=\s*["']/i, `${page} has an inline event handler`);
+    for (const [, src] of html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)) {
+      assert.ok(src.startsWith("/"), `${page} loads a script from another origin: ${src}`);
+    }
+    // Every page links to both guides.
+    assert.match(html, /href="\/how-it-works"/, `${page} doesn't link to /how-it-works`);
+    assert.match(html, /href="\/deploy"/, `${page} doesn't link to /deploy`);
+  }
+});
+
 test("owner endpoints require sign-in", async () => {
   db.getSessionUser = async () => null;
   await withServer(async (base) => {

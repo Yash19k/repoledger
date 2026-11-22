@@ -1,0 +1,324 @@
+/* RepoLedger: long-form pages (How it works, Deploy on AWS). Loaded after styles.css and uses its tokens. */
+
+a.account-btn { text-decoration: none; }
+
+/* Line icons from an inline <symbol> sprite. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.i { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.callout > .i { width: 18px; height: 18px; }
+
+/* ---------- page head ---------- */
+
+.doc-head { padding-top: 64px; padding-bottom: 36px; }
+.doc-kicker {
+  margin: 0 0 14px; font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; color: var(--text-3);
+}
+.doc-head h1 {
+  font-weight: 600; font-size: clamp(30px, 4.4vw, 44px); line-height: 1.1; letter-spacing: -0.035em;
+  margin: 0 0 14px; max-width: 24ch; text-wrap: balance;
+}
+.doc-lede { font-size: 17px; color: var(--text-2); max-width: 64ch; margin: 0; }
+.doc-meta { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 20px 0 0; padding: 0; list-style: none; font-size: 14px; color: var(--text-3); }
+.doc-meta li { display: inline-flex; align-items: center; gap: 8px; }
+.doc-meta svg { color: var(--text-3); }
+
+/* ---------- layout: rail + reading column ---------- */
+
+.doc-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
+.doc-rail { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow-y: auto; padding-bottom: 16px; }
+.doc-rail-title { margin: 0 0 8px; padding: 0 10px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.doc-rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.doc-rail a {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px;
+  font-size: 14px; color: var(--text-2); text-decoration: none;
+}
+.doc-rail a:hover { color: var(--text); background: var(--surface-2); }
+.doc-rail a[aria-current] { color: var(--text); background: var(--surface-2); font-weight: 500; }
+.doc-rail .sep { height: 1px; background: var(--border); margin: 6px 10px; }
+
+.rail-n {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%;
+  border: 1px solid var(--border-strong); font-family: "Geist Mono", monospace; font-size: 11px; font-weight: 500; color: var(--text-3);
+}
+.rail-n svg { display: none; }
+.doc-rail a.done .rail-n { background: var(--ok); border-color: var(--ok); color: #fff; }
+.doc-rail a.done .rail-n b { display: none; }
+.doc-rail a.done .rail-n svg { display: block; }
+
+.doc-main { min-width: 0; }
+
+/* ---------- prose ---------- */
+
+.doc-section { padding: 0 0 44px; scroll-margin-top: 84px; }
+.doc-section + .doc-section { border-top: 1px solid var(--border); padding-top: 40px; }
+.doc-section h2 { font-weight: 600; font-size: 24px; line-height: 1.2; letter-spacing: -0.025em; margin: 0 0 10px; }
+.doc-section h3 { font-weight: 600; font-size: 16px; letter-spacing: -0.01em; margin: 28px 0 8px; }
+.doc-section > p, .doc-card > p, .doc-prose p { color: var(--text-2); max-width: 70ch; margin: 0 0 14px; }
+.doc-section strong, .doc-card strong { color: var(--text); font-weight: 600; }
+.section-lede { font-size: 16px; }
+
+.doc-list { margin: 0 0 16px; padding-left: 20px; color: var(--text-2); max-width: 72ch; }
+.doc-list li { margin: 0 0 8px; padding-left: 2px; }
+.doc-list li::marker { color: var(--text-3); }
+ol.doc-list li::marker { font-family: "Geist Mono", monospace; font-size: 13px; }
+
+.doc-section code, .doc-card code, .doc-table code, .term code, .callout code, .faq code, .checks code, .fine code {
+  font-family: "Geist Mono", ui-monospace, monospace; font-size: 0.86em; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
+}
+.doc-main a:not(.btn):not(.phase) { color: var(--accent); text-decoration: none; }
+.doc-main a:not(.btn):not(.phase):hover { text-decoration: underline; text-underline-offset: 3px; }
+.ui { color: var(--text); font-style: normal; font-weight: 500; }
+
+/* ---------- two modes ---------- */
+
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0 8px; }
+.mode { padding: 22px; }
+.mode-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.mode h3 { margin: 0; font-size: 16px; }
+.mode-route { font-family: "Geist Mono", monospace; font-size: 12px; color: var(--text-3); }
+.mode p { color: var(--text-2); font-size: 14px; margin: 0 0 12px; }
+.mode .marks li { font-size: 14px; }
+.mode .marks + .marks { margin-top: 10px; border-top: 1px solid var(--border); }
+
+/* ---------- tables ---------- */
+
+.doc-table {
+  margin: 16px 0 18px; overflow-x: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-sm);
+}
+.doc-table table { font-size: 14px; }
+.doc-table th { position: static; white-space: nowrap; }
+.doc-table td { white-space: normal; vertical-align: top; color: var(--text-2); }
+.doc-table td:first-child { color: var(--text); }
+.doc-table td code { white-space: nowrap; }
+.doc-table tbody tr:hover td { background: transparent; }
+.doc-table tr.pick td { background: var(--accent-soft); }
+.doc-table .yes { color: var(--ok); font-weight: 500; }
+.doc-table .no { color: var(--danger); font-weight: 500; }
+.doc-table td.nowrap { white-space: nowrap; }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; margin: 16px 0;
+  padding: 14px 16px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px;
+  background: var(--surface-2); font-size: 14px; color: var(--text-2);
+}
+.callout > svg { color: var(--accent); margin-top: 2px; }
+.callout p { margin: 0; max-width: 72ch; }
+.callout p + p { margin-top: 8px; }
+.callout strong { color: var(--text); font-weight: 600; }
+.callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.callout.warn > svg { color: var(--warn); }
+
+/* ---------- definition grid ---------- */
+
+.terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 16px 0; }
+.term { margin: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.term dt { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 4px; }
+.term dd { margin: 0; font-size: 14px; color: var(--text-2); }
+
+/* ---------- diagrams (inline SVG, coloured from the theme tokens) ---------- */
+
+.diagram {
+  margin: 20px 0 8px; padding: 12px; overflow-x: auto;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 12px;
+}
+.diagram svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.scroll-hint { margin: 16px 0 -12px; font-size: 12px; color: var(--text-3); }
+.diagram-caption { font-size: 13px; color: var(--text-3); margin: 0 0 16px; max-width: 72ch; }
+.d-box { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.25; }
+.d-zone { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1.25; }
+.d-main { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.d-row { fill: var(--surface); stroke: var(--border); stroke-width: 1; }
+.d-line { fill: none; stroke: var(--text-3); stroke-width: 1.4; }
+.d-ret { fill: none; stroke: var(--text-3); stroke-width: 1.4; stroke-dasharray: 5 4; }
+.d-life { fill: none; stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 4; }
+.d-bad { fill: none; stroke: var(--danger); stroke-width: 1.4; stroke-dasharray: 4 4; }
+.d-x { stroke: var(--danger); stroke-width: 2.2; }
+.d-arrow { fill: var(--text-3); }
+.d-t { fill: var(--text); font: 600 13px "Geist", system-ui, sans-serif; }
+.d-s { fill: var(--text-2); font: 400 11.5px "Geist", system-ui, sans-serif; }
+.d-l { fill: var(--text-3); font: 500 11px "Geist Mono", ui-monospace, monospace; }
+.d-m { fill: var(--text-2); font: 500 11.5px "Geist Mono", ui-monospace, monospace; }
+.d-r { fill: var(--danger); font: 500 11.5px "Geist", system-ui, sans-serif; }
+.d-step { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1; }
+.d-step-n { fill: var(--text-3); font: 500 10px "Geist Mono", ui-monospace, monospace; }
+
+/* ---------- next-page card ---------- */
+
+.next-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  margin-top: 20px; padding: 20px 22px;
+}
+.next-card h3 { margin: 0 0 4px; font-size: 16px; }
+.next-card p { margin: 0; color: var(--text-2); font-size: 14px; max-width: 60ch; }
+
+/* =================================================================
+   Deploy guide
+   ================================================================= */
+
+/* ---------- your values ---------- */
+
+.values { padding: 20px 22px; margin: 0 0 40px; }
+.values-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+.values-head h2 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.values-head p { margin: 0; font-size: 13px; color: var(--text-3); }
+.fields { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px 20px; }
+.field { min-width: 0; grid-column: span 2; }
+.field.wide { grid-column: span 3; }
+.field input[type="text"] { width: 100%; font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; height: 36px; }
+.field small { display: block; margin-top: 6px; font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
+.field small .v { font-family: "Geist Mono", monospace; }
+.switches { display: flex; flex-wrap: wrap; gap: 16px 28px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.switches .control small { display: block; margin-top: 6px; font-size: 12px; color: var(--text-3); }
+
+/* ---------- progress ---------- */
+
+.doc-progress { padding: 0 10px 14px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+.doc-progress-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--text-3); margin-bottom: 8px; }
+.doc-progress-top strong { font-family: "Geist Mono", monospace; font-weight: 500; color: var(--text); }
+.bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.bar > span { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--ok); transition: width 0.3s ease; }
+
+/* ---------- step cards ---------- */
+
+.doc-steps { display: grid; gap: 20px; }
+.doc-card { padding: 28px; scroll-margin-top: 84px; min-width: 0; }
+.doc-card > :last-child { margin-bottom: 0; }
+.doc-card h2 { font-weight: 600; font-size: 22px; line-height: 1.2; letter-spacing: -0.025em; margin: 0; }
+.doc-card h3 { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; margin: 24px 0 8px; }
+.doc-card > .doc-table:first-child, .doc-card > h3:first-child { margin-top: 0; }
+
+.step-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: start; margin-bottom: 18px; }
+.step-head.plain { grid-template-columns: minmax(0, 1fr); }
+.step-badge {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; margin-top: -2px;
+  border: 1px solid var(--border-strong); font-family: "Geist Mono", monospace; font-size: 13px; font-weight: 600; color: var(--text-2);
+}
+.doc-card.is-done .step-badge { background: var(--ok); border-color: var(--ok); color: #fff; }
+.step-learn { margin: 4px 0 0; font-size: 13px; color: var(--text-3); }
+
+.done-toggle {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--surface); box-shadow: var(--shadow-sm);
+  font-size: 13px; font-weight: 500; color: var(--text-2); cursor: pointer; white-space: nowrap; user-select: none;
+  transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+}
+.done-toggle:hover { border-color: var(--text-3); color: var(--text); }
+.done-toggle input { accent-color: var(--ok); margin: 0; }
+.done-toggle.is-checked { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+
+/* ---------- code blocks ---------- */
+
+.code { margin: 14px 0 16px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.code-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 5px 6px 5px 12px; background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+}
+.where { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-family: "Geist Mono", monospace; font-size: 12px; color: var(--text-3); }
+.where svg { flex: 0 0 auto; }
+.where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copy {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; flex: 0 0 auto;
+  border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--text-2); transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.copy:hover { background: var(--surface-2); color: var(--text); }
+.copy.copied { color: var(--ok); border-color: var(--ok); }
+.code pre {
+  margin: 0; padding: 14px 16px; overflow-x: auto; tab-size: 4;
+  font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; line-height: 1.65; color: var(--text);
+}
+.code pre code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
+.code .c { color: var(--text-3); }
+:is(.doc-main, .doc-head, .values) .v { color: var(--accent); border-bottom: 1px dashed currentColor; }
+
+/* ---------- phases ---------- */
+
+.phases { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.phase {
+  display: flex; flex-direction: column; gap: 4px; padding: 16px; text-decoration: none; color: inherit;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); transition: border-color 0.15s;
+}
+.phase:hover { border-color: var(--border-strong); }
+.phase-steps { font-family: "Geist Mono", monospace; font-size: 11px; color: var(--text-3); }
+.phase strong { font-size: 15px; font-weight: 600; color: var(--text); }
+.phase span:not(.phase-steps) { font-size: 13px; color: var(--text-2); }
+.phase em { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); font-style: normal; font-size: 13px; color: var(--text); }
+.phase.last { border-color: var(--accent); }
+
+/* ---------- verify checklist ---------- */
+
+.checks { list-style: none; margin: 16px 0 20px; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.checks li { border-bottom: 1px solid var(--border); }
+.checks li:last-child { border-bottom: 0; }
+.checks label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 16px; cursor: pointer; font-size: 14px; color: var(--text); }
+.checks input { accent-color: var(--ok); margin: 3px 0 0; }
+.checks label.is-checked > span { color: var(--text-3); text-decoration: line-through; }
+
+/* ---------- troubleshooting ---------- */
+
+.doc-card .faq { margin: 12px 0 20px; max-width: none; }
+.doc-card .faq summary { font-size: 14px; padding: 14px 32px 14px 0; font-family: "Geist Mono", ui-monospace, monospace; }
+.doc-card .faq details p { margin: -4px 0 14px; font-size: 14px; }
+
+/* ---------- DB and OS switches show one path ---------- */
+
+:root[data-db="supabase"] .only-rds { display: none !important; }
+:root:not([data-db="supabase"]) .only-supa { display: none !important; }
+:root[data-os="unix"] .only-win { display: none !important; }
+:root:not([data-os="unix"]) .only-unix { display: none !important; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 980px) {
+  .doc-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .doc-rail { position: static; max-height: none; padding: 14px 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .doc-rail ol { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .doc-rail .sep { grid-column: 1 / -1; }
+  .phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .field { grid-column: span 1; }
+  .field.wide { grid-column: span 2; }
+}
+
+@media (max-width: 760px) {
+  .modes { grid-template-columns: 1fr; }
+  .doc-section, .doc-card { scroll-margin-top: 112px; }
+}
+
+@media (max-width: 600px) {
+  .doc-head { padding-top: 36px; padding-bottom: 24px; }
+  .doc-lede { font-size: 16px; }
+  .doc-card { padding: 20px 16px; }
+  .step-head { grid-template-columns: auto minmax(0, 1fr); }
+  .step-head .done-toggle { grid-column: 1 / -1; justify-self: start; }
+  .values { padding: 16px; }
+  .fields { grid-template-columns: minmax(0, 1fr); }
+  .field, .field.wide { grid-column: auto; }
+  .switches .control, .switches .segmented { width: 100%; }
+  .switches .segmented button { flex: 1; }
+  .mode { padding: 18px; }
+  .code pre { padding: 12px; font-size: 12.5px; }
+  .doc-rail ol { grid-template-columns: 1fr 1fr; }
+
+  /* Tables become stacked rows, each value under its column name (labels come from site.js). */
+  .doc-table table, .doc-table tbody, .doc-table tr, .doc-table td { display: block; width: 100%; }
+  .doc-table thead { display: none; }
+  .doc-table tr { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .doc-table tbody tr:last-child { border-bottom: 0; }
+  .doc-table td, .doc-table tbody tr:last-child td { padding: 0; border: 0; }
+  .doc-table td + td { margin-top: 6px; }
+  .doc-table td:first-child { font-weight: 500; }
+  .doc-table td:empty { display: none; }
+  .doc-table td + td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 400; color: var(--text-3); }
+  .doc-table tr.pick { background: var(--accent-soft); }
+  .doc-table tr.pick td { background: transparent; }
+  .doc-table td code { white-space: normal; overflow-wrap: anywhere; }
+}
+
+@media (max-width: 380px) {
+  .phases { grid-template-columns: minmax(0, 1fr); }
+}

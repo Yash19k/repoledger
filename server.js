@@ -569,9 +569,11 @@ function createApp() {
   plotlyBundle();
   app.get("/vendor/plotly.min.js", sendPlotly);
   app.use(express.static(path.join(__dirname, "public"), { index: "index.html", setHeaders: revalidate }));
-  app.get(/^\/u\/[^/]+\/?$/, (req, res) =>
-    res.sendFile(path.join(__dirname, "public", "index.html"), { headers: { "Cache-Control": "no-cache" } })
-  );
+  const page = (file) => (req, res) =>
+    res.sendFile(path.join(__dirname, "public", file), { headers: { "Cache-Control": "no-cache" } });
+  app.get(/^\/u\/[^/]+\/?$/, page("index.html"));
+  app.get(/^\/how-it-works\/?$/, page("how-it-works.html"));
+  app.get(/^\/deploy\/?$/, page("deploy.html"));
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {

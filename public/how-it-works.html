@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How it works · RepoLedger</title>
+    <meta name="description" content="How RepoLedger works: public lookups and signed-in traffic, the read-only GitHub App, sessions, the six-hourly collector that keeps traffic past GitHub's 14-day limit, what is stored and the security model." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><rect x='8' y='17' width='4' height='7' rx='1' fill='white'/><rect x='14' y='12' width='4' height='12' rx='1' fill='white'/><rect x='20' y='8' width='4' height='16' rx='1' fill='white'/></svg>" />
+    <script src="/theme-init.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/docs.css" />
+  </head>
+  <body>
+    <header class="nav" id="masthead">
+      <div class="wrap nav-inner">
+        <a class="brand" href="/" aria-label="RepoLedger home">
+          <svg class="brand-mark" viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor"/><rect x="8" y="17" width="4" height="7" rx="1" fill="#fff"/><rect x="14" y="12" width="4" height="12" rx="1" fill="#fff"/><rect x="20" y="8" width="4" height="16" rx="1" fill="#fff"/></svg>
+          <span>RepoLedger</span>
+        </a>
+        <nav class="nav-links" aria-label="Site">
+          <a href="/how-it-works" aria-current="page">How it works</a>
+          <a href="/deploy">Deploy on AWS</a>
+        </nav>
+        <div class="nav-right">
+          <div class="masthead-actions" id="masthead-actions"><a class="btn btn-primary btn-sm" href="/auth/login">Sign in with GitHub</a></div>
+          <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch theme"></button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="wrap doc-head">
+        <p class="doc-kicker">How it works</p>
+        <h1>What happens between GitHub and your dashboard</h1>
+        <p class="doc-lede">
+          RepoLedger is one small Node server, one PostgreSQL database, a read-only GitHub App and a collector that runs
+          every six hours. This page walks through each part: what it asks GitHub for, what it stores, for how long, and
+          how it is protected.
+        </p>
+      </section>
+
+      <div class="wrap doc-layout">
+        <nav class="doc-rail" aria-label="On this page" data-rail>
+          <p class="doc-rail-title">On this page</p>
+          <ol>
+            <li><a href="#modes">Two ways to use it</a></li>
+            <li><a href="#architecture">The moving parts</a></li>
+            <li><a href="#lookup">A public lookup</a></li>
+            <li><a href="#signin">Signing in</a></li>
+            <li><a href="#app">The GitHub App</a></li>
+            <li><a href="#sessions">Sessions</a></li>
+            <li><a href="#collector">Keeping traffic</a></li>
+            <li><a href="#storage">What is stored</a></li>
+            <li><a href="#security">Security and limits</a></li>
+            <li><a href="#self-host">Run your own</a></li>
+          </ol>
+        </nav>
+
+        <div class="doc-main">
+          <!-- ============ Modes ============ -->
+          <section class="doc-section" id="modes">
+            <h2>Two ways to use it</h2>
+            <p class="section-lede">
+              GitHub only shares a repository's traffic with people who can push to it. So RepoLedger has two modes:
+              anyone can look up public statistics, and only the owner, signed in, sees traffic.
+            </p>
+            <div class="modes">
+              <article class="card mode">
+                <div class="mode-head">
+                  <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+                  <div><h3>Look up a username</h3><span class="mode-route">/u/&lt;login&gt; · no sign-in</span></div>
+                </div>
+                <p>Reads a user's public repositories with RepoLedger's own token and caches the results.</p>
+                <ul class="marks yes">
+                  <li>Stars with full history, weekly commits and lines changed</li>
+                  <li>Open and closed issues and pull requests, top contributors</li>
+                </ul>
+                <ul class="marks no">
+                  <li>Never views, clones or referring sites</li>
+                </ul>
+              </article>
+              <article class="card mode">
+                <div class="mode-head">
+                  <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M3 3v18h18M7 15l4-4 3 3 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                  <div><h3>Sign in as the owner</h3><span class="mode-route">/ · GitHub sign-in + app install</span></div>
+                </div>
+                <p>You install the GitHub App on the repositories you choose, and RepoLedger collects their traffic.</p>
+                <ul class="marks yes">
+                  <li>Everything a lookup shows, plus daily views, unique visitors and clones</li>
+                  <li>Referring sites and popular pages, private repositories you select</li>
+                </ul>
+                <ul class="marks no">
+                  <li>Shown only to you while signed in</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+
+          <!-- ============ Architecture ============ -->
+          <section class="doc-section" id="architecture">
+            <h2>The moving parts</h2>
+            <p>
+              The browser loads a plain HTML, CSS and JavaScript app from <code>public/</code>; there is no build step.
+              Everything else goes through one Express server (<code>server.js</code>). A separate collector process
+              (<code>src/collector.js</code>) runs on a schedule and shares the same database and GitHub client code.
+            </p>
+            <div class="diagram" role="img" aria-label="Architecture: the browser talks HTTPS to the RepoLedger server, which serves static pages, sign-in, the owner API and the public API. The server calls the GitHub API and reads and writes PostgreSQL. The collector, run by GitHub Actions every six hours, reads GitHub with installation tokens and writes to PostgreSQL.">
+              <svg viewBox="0 0 760 400">
+                <defs><marker id="hw-a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="d-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+                <rect class="d-zone" x="220" y="20" width="300" height="236" rx="10"/>
+                <text class="d-t" x="236" y="46">RepoLedger server</text>
+                <text class="d-s" x="236" y="64">Node + Express, a single process</text>
+                <rect class="d-row" x="236" y="80" width="268" height="36" rx="6"/>
+                <text class="d-t" x="250" y="103">Static pages</text><text class="d-l" x="490" y="103" text-anchor="end">public/</text>
+                <rect class="d-row" x="236" y="124" width="268" height="36" rx="6"/>
+                <text class="d-t" x="250" y="147">Sign-in</text><text class="d-l" x="490" y="147" text-anchor="end">/auth/*</text>
+                <rect class="d-main" x="236" y="168" width="268" height="36" rx="6"/>
+                <text class="d-t" x="250" y="191">Owner API</text><text class="d-l" x="490" y="191" text-anchor="end">/api/* · session</text>
+                <rect class="d-row" x="236" y="212" width="268" height="36" rx="6"/>
+                <text class="d-t" x="250" y="235">Public API</text><text class="d-l" x="490" y="235" text-anchor="end">/api/public/*</text>
+
+                <rect class="d-box" x="20" y="104" width="150" height="64" rx="8"/>
+                <text class="d-t" x="95" y="131" text-anchor="middle">Browser</text>
+                <text class="d-s" x="95" y="149" text-anchor="middle">vanilla JS + Plotly</text>
+                <path class="d-line" d="M170 136H218" marker-end="url(#hw-a1)"/>
+                <text class="d-l" x="195" y="127" text-anchor="middle">HTTPS</text>
+
+                <rect class="d-box" x="580" y="96" width="160" height="80" rx="8"/>
+                <text class="d-t" x="660" y="122" text-anchor="middle">GitHub</text>
+                <text class="d-s" x="660" y="140" text-anchor="middle">REST API + OAuth</text>
+                <text class="d-s" x="660" y="156" text-anchor="middle">api.github.com only</text>
+                <path class="d-line" d="M520 136H578" marker-end="url(#hw-a1)"/>
+                <text class="d-l" x="550" y="127" text-anchor="middle">API</text>
+
+                <rect class="d-box" x="290" y="304" width="160" height="80" rx="8"/>
+                <text class="d-t" x="370" y="330" text-anchor="middle">PostgreSQL</text>
+                <text class="d-s" x="370" y="348" text-anchor="middle">stats, accounts,</text>
+                <text class="d-s" x="370" y="364" text-anchor="middle">lookup cache</text>
+                <path class="d-line" d="M370 256V302" marker-end="url(#hw-a1)"/>
+                <text class="d-l" x="380" y="284">SQL</text>
+
+                <rect class="d-box" x="580" y="304" width="160" height="80" rx="8"/>
+                <text class="d-t" x="660" y="330" text-anchor="middle">Collector</text>
+                <text class="d-s" x="660" y="348" text-anchor="middle">GitHub Actions cron,</text>
+                <text class="d-s" x="660" y="364" text-anchor="middle">every 6 hours</text>
+                <path class="d-line" d="M660 304V178" marker-end="url(#hw-a1)"/>
+                <text class="d-l" x="652" y="244" text-anchor="end">installation tokens</text>
+                <path class="d-line" d="M580 344H452" marker-end="url(#hw-a1)"/>
+                <text class="d-l" x="516" y="336" text-anchor="middle">writes</text>
+              </svg>
+            </div>
+            <p class="diagram-caption">The collector and the server never talk to each other directly. They meet in the database. The server can also start a collection itself, right after a first sign-in or when you press <em class="ui">Collect now</em>.</p>
+            <div class="doc-table">
+              <table>
+                <thead><tr><th>Part</th><th>Code</th><th>Job</th></tr></thead>
+                <tbody>
+                  <tr><td>Frontend</td><td><code>public/</code></td><td>Landing page, dashboards and lookups. Charts drawn with a CSP-safe Plotly build served from the same origin.</td></tr>
+                  <tr><td>Web server</td><td><code>server.js</code></td><td>Serves pages and the JSON API, runs sign-in, enforces rate limits, and runs hourly housekeeping.</td></tr>
+                  <tr><td>GitHub client</td><td><code>src/github.js</code></td><td>REST calls with a 20-second timeout, pagination, the app's signed tokens and the sign-in exchange.</td></tr>
+                  <tr><td>Per-repository collection</td><td><code>src/collect-repo.js</code></td><td>Reads one repository's stats (and traffic, when allowed) and saves them.</td></tr>
+                  <tr><td>Public lookups</td><td><code>src/public-lookup.js</code></td><td>Background refresh of a username's public repositories, with a shared request budget.</td></tr>
+                  <tr><td>Collector</td><td><code>src/collector.js</code></td><td>Visits every installation of the app and saves its traffic.</td></tr>
+                  <tr><td>Database</td><td><code>src/db.js</code>, <code>scripts/init-db.js</code></td><td>All SQL, and a schema script that only adds what's missing and never deletes data.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- ============ Lookup ============ -->
+          <section class="doc-section" id="lookup">
+            <h2>A public lookup, step by step</h2>
+            <p>
+              Opening <code>/u/octocat</code> serves the same single page as the landing page. The script sees the
+              username in the address and asks the server for <code>/api/public/octocat</code>.
+            </p>
+            <ol class="doc-list">
+              <li><strong>Cache check.</strong> If RepoLedger read this account in the last six hours, the cached result comes back at once.</li>
+              <li><strong>Background refresh.</strong> Otherwise the server starts a refresh and answers <code>refreshing</code> with progress. The page polls every two seconds and shows a progress bar.</li>
+              <li><strong>Which repositories.</strong> The refresh lists repositories the account owns (up to 500, most recently pushed first), drops forks and private ones, and keeps the 60 most recently pushed.</li>
+              <li><strong>Per repository</strong>, four at a time: weekly commits and lines added and removed, contributors, today's star count, open and closed issues and pull requests, and, the first time a repository with up to 2,000 stars is seen, its full star history rebuilt from each stargazer's timestamp.</li>
+              <li><strong>Ready.</strong> The next poll returns the profile and its repositories, and the dashboard asks <code>/api/public/octocat/data</code> for the chosen date range.</li>
+            </ol>
+            <p>
+              Lookups use a GitHub token with no scopes (<code>GITHUB_PUBLIC_TOKEN</code>), which can only read public
+              data. GitHub allows it 5,000 requests an hour, shared by every visitor, so RepoLedger rations it:
+            </p>
+            <ul class="doc-list">
+              <li>At most three lookups run at once. A fourth visitor sees <em class="ui">Waiting for a free slot</em> and the page retries every five seconds.</li>
+              <li>Each network may start 30 new lookups an hour. Opening cached results doesn't count.</li>
+              <li>A lookup stops when the hourly budget falls to its reserve (10% of GitHub's limit, at most 300 requests), so one huge account can't use up everyone else's lookups or sign-ins.</li>
+              <li>If the account doesn't exist, the answer is "not found" and any cached copy is deleted.</li>
+            </ul>
+            <div class="callout">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              <div><p><strong>Lookups never include traffic.</strong> The public endpoints only query commit, issue, star and contributor tables, and only for repositories in that profile's own cached list. A repository that its owner's installation reports as private is hidden from lookups even if it was public when cached.</p></div>
+            </div>
+          </section>
+
+          <!-- ============ Sign-in ============ -->
+          <section class="doc-section" id="signin">
+            <h2>Signing in</h2>
+            <p>
+              Sign-in uses the GitHub App's own OAuth flow. RepoLedger only needs to learn who you are and which
+              installations of the app belong to you, so the token GitHub hands back is used for two requests and then
+              revoked.
+            </p>
+            <div class="diagram" role="img" aria-label="Sign-in sequence between the browser, RepoLedger, GitHub and the database. The browser opens /auth/login, gets a state cookie and is sent to GitHub. After approval GitHub redirects back to /auth/callback with a code. RepoLedger checks the state, exchanges the code for a user token, reads the user and their installations, saves the user, installations and a hashed session, revokes the token and sets the session cookie.">
+              <svg viewBox="0 0 760 470">
+                <defs><marker id="hw-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="d-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+                <rect class="d-box" x="30" y="14" width="120" height="36" rx="8"/><text class="d-t" x="90" y="37" text-anchor="middle">Browser</text>
+                <rect class="d-main" x="240" y="14" width="120" height="36" rx="8"/><text class="d-t" x="300" y="37" text-anchor="middle">RepoLedger</text>
+                <rect class="d-box" x="450" y="14" width="120" height="36" rx="8"/><text class="d-t" x="510" y="37" text-anchor="middle">GitHub</text>
+                <rect class="d-box" x="630" y="14" width="120" height="36" rx="8"/><text class="d-t" x="690" y="37" text-anchor="middle">Database</text>
+                <path class="d-life" d="M90 50V456M300 50V456M510 50V456M690 50V456"/>
+
+                <text class="d-step-n" x="14" y="88">1</text>
+                <text class="d-m" x="195" y="80" text-anchor="middle">GET /auth/login</text>
+                <path class="d-line" d="M90 88H298" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="122">2</text>
+                <text class="d-s" x="195" y="114" text-anchor="middle">state cookie (10 min), redirect</text>
+                <path class="d-ret" d="M300 122H92" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="156">3</text>
+                <text class="d-s" x="300" y="148" text-anchor="middle">you approve on github.com</text>
+                <path class="d-line" d="M90 156H508" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="190">4</text>
+                <text class="d-s" x="300" y="182" text-anchor="middle">redirect back with code + state</text>
+                <path class="d-ret" d="M510 190H92" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="224">5</text>
+                <text class="d-m" x="195" y="216" text-anchor="middle">GET /auth/callback</text>
+                <path class="d-line" d="M90 224H298" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="258">6</text>
+                <rect class="d-step" x="294" y="244" width="12" height="24" rx="2"/>
+                <text class="d-s" x="314" y="261">state matches the cookie?</text>
+
+                <text class="d-step-n" x="14" y="292">7</text>
+                <text class="d-s" x="405" y="284" text-anchor="middle">exchange code for a user token</text>
+                <path class="d-line" d="M300 292H508" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="326">8</text>
+                <text class="d-m" x="405" y="318" text-anchor="middle">/user, /user/installations</text>
+                <path class="d-line" d="M300 326H508" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="360">9</text>
+                <text class="d-s" x="600" y="352" text-anchor="middle">user, installations, session hash</text>
+                <path class="d-line" d="M300 360H688" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="394">10</text>
+                <text class="d-s" x="405" y="386" text-anchor="middle">revoke the user token</text>
+                <path class="d-line" d="M300 394H508" marker-end="url(#hw-a2)"/>
+
+                <text class="d-step-n" x="14" y="428">11</text>
+                <text class="d-s" x="195" y="420" text-anchor="middle">rl_session cookie, redirect to /</text>
+                <path class="d-ret" d="M300 428H92" marker-end="url(#hw-a2)"/>
+              </svg>
+            </div>
+            <p class="diagram-caption">Solid arrows are requests, dashed arrows are responses. Steps 7 to 11 all happen inside the single <code>/auth/callback</code> request.</p>
+            <ol class="doc-list">
+              <li><strong>State.</strong> <code>/auth/login</code> creates 16 random bytes, stores them in a short-lived cookie scoped to <code>/auth</code>, and sends you to GitHub with the same value. The callback compares the two in constant time, which stops another site from completing a sign-in in your browser.</li>
+              <li><strong>Who you are.</strong> The code is exchanged for a user token, which reads your GitHub id, login and avatar, and your installations of the app. Only installations on your own personal account are recorded; organisations aren't supported yet.</li>
+              <li><strong>Revoked.</strong> Whatever happens, the user token is revoked at the end of the request. RepoLedger never stores it.</li>
+              <li><strong>First collection.</strong> If an installation has never been collected, a collection starts in the background, so your dashboard fills within a minute or two.</li>
+            </ol>
+            <p>After you install or change the app on GitHub, GitHub sends you to <code>/auth/installed</code>, which simply signs you in again to pick up the change.</p>
+          </section>
+
+          <!-- ============ App ============ -->
+          <section class="doc-section" id="app">
+            <h2>The GitHub App and its permissions</h2>
+            <p>
+              RepoLedger is a GitHub App, not a classic OAuth app. You see the exact permissions on GitHub's install
+              screen, and you choose all repositories or only some. Every permission is read-only.
+            </p>
+            <div class="doc-table">
+              <table>
+                <thead><tr><th>Permission</th><th>Access</th><th>Why</th></tr></thead>
+                <tbody>
+                  <tr><td>Administration</td><td>Read</td><td>GitHub requires it for the traffic API: views, clones, referrers and popular pages. RepoLedger uses it for nothing else.</td></tr>
+                  <tr><td>Issues</td><td>Read</td><td>Open and closed issue counts.</td></tr>
+                  <tr><td>Pull requests</td><td>Read</td><td>Open and closed pull-request counts.</td></tr>
+                  <tr><td>Metadata</td><td>Read</td><td>Repository names. Every GitHub App has it.</td></tr>
+                  <tr><td>Contents</td><td class="no nowrap">Not requested</td><td>RepoLedger can never read your code or files.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              The app has no webhook. Instead, the collector notices when an installation disappears or a repository is
+              removed from it, and deletes the matching data.
+            </p>
+            <h3>Two kinds of app tokens</h3>
+            <dl class="terms">
+              <div class="term"><dt>App token (JWT)</dt><dd>Signed with the app's private key (RS256), valid for about nine minutes. It can only list installations and ask for installation tokens.</dd></div>
+              <div class="term"><dt>Installation token</dt><dd>Issued by GitHub for one installation, valid for an hour, limited to the repositories you picked. Kept in memory and reused until five minutes before it expires.</dd></div>
+            </dl>
+          </section>
+
+          <!-- ============ Sessions ============ -->
+          <section class="doc-section" id="sessions">
+            <h2>Sessions</h2>
+            <p>
+              Once GitHub has confirmed who you are, RepoLedger keeps you signed in with its own session, not with a
+              GitHub token.
+            </p>
+            <ul class="doc-list">
+              <li><strong>Random token, stored hashed.</strong> The session token is 32 random bytes. Your browser holds the token; the database holds only its SHA-256 hash, so a database leak doesn't hand out working sessions.</li>
+              <li><strong>Cookie flags.</strong> <code>rl_session</code> is <code>HttpOnly</code> (scripts can't read it), <code>SameSite=Lax</code>, and <code>Secure</code> whenever the site runs on HTTPS.</li>
+              <li><strong>30 days.</strong> Sessions expire after 30 days. Signing in again replaces your old session instead of leaving it valid, signing out deletes it, and expired rows are cleaned up every hour.</li>
+              <li><strong>Every request</strong> hashes the cookie and looks it up. If the database is down you get a "try again" error, not a silent sign-out.</li>
+            </ul>
+          </section>
+
+          <!-- ============ Collector ============ -->
+          <section class="doc-section" id="collector">
+            <h2>How traffic outlives GitHub's 14 days</h2>
+            <p>
+              GitHub's traffic API only ever returns the last 14 days: one row per day of views and of clones, with
+              totals and unique visitors. RepoLedger asks for those 14 days every six hours and saves each day as its own
+              row, keyed by repository and date.
+            </p>
+            <ul class="doc-list">
+              <li><strong>Overlap is the point.</strong> Each run rewrites the days GitHub still reports, so a day's numbers settle on GitHub's final count. Days that have fallen out of GitHub's window stay in the database untouched.</li>
+              <li><strong>Missed runs are harmless</strong> as long as one run succeeds within any 14-day stretch. Only a gap longer than that loses days.</li>
+              <li><strong>Referring sites and popular pages</strong> are different: GitHub only gives a top-10 summary of the last 14 days, not daily rows, so RepoLedger keeps the latest summary and replaces it on each run.</li>
+            </ul>
+            <h3>One collection run</h3>
+            <ol class="doc-list">
+              <li>GitHub Actions starts <code>npm run collect</code> at minute 0 of every sixth hour (UTC). Two runs never overlap, and a run is stopped after 60 minutes.</li>
+              <li>With the app token, it lists every installation of the app and deletes the data of installations that are gone.</li>
+              <li>Installations are sorted least recently collected first, so a run cut short starts with whoever was skipped, and four are collected in parallel (each has its own GitHub rate limit).</li>
+              <li>For each installation it lists the repositories you granted, deletes data for repositories you removed, then reads every repository: views, clones, referrers and popular pages, plus the same public stats a lookup collects.</li>
+            </ol>
+            <div class="callout">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <div><p><strong>Collect now</strong> in the account menu runs the same code inside the web server. It is refused if your data was collected in the last 10 minutes, and can be started at most once a minute, because every run spends the app's shared GitHub rate limit.</p></div>
+            </div>
+          </section>
+
+          <!-- ============ Storage ============ -->
+          <section class="doc-section" id="storage">
+            <h2>What is stored, and for how long</h2>
+            <p>
+              RepoLedger stores counts, not content. There is no email address, no code and no GitHub token in the
+              database. Here is every table, grouped by what it's for.
+            </p>
+            <div class="doc-table">
+              <table>
+                <thead><tr><th>Data</th><th>Tables</th><th>Kept until</th></tr></thead>
+                <tbody>
+                  <tr><td>Daily views and clones</td><td><code>traffic_views</code>, <code>traffic_clones</code></td><td>The repository leaves your installation, you uninstall the app, or you delete your data.</td></tr>
+                  <tr><td>Referrers and popular pages</td><td><code>referrers</code>, <code>popular_paths</code></td><td>Replaced on every run; deleted with the traffic above.</td></tr>
+                  <tr><td>Commits, contributors, issues, PRs, stars</td><td><code>commit_activity</code>, <code>contributors</code>, <code>issue_pr_stats</code>, <code>star_stats</code></td><td>No installation and no cached lookup lists the repository any more.</td></tr>
+                  <tr><td>Your account</td><td><code>users</code></td><td>GitHub id, login and avatar URL, until you delete your data.</td></tr>
+                  <tr><td>Sessions</td><td><code>sessions</code></td><td>Token hash and expiry; 30 days at most.</td></tr>
+                  <tr><td>Installations</td><td><code>installations</code>, <code>installation_repos</code></td><td>Account, suspended flag, last collection, and the repository names you granted, while the app is installed.</td></tr>
+                  <tr><td>Lookup cache</td><td><code>profiles</code>, <code>profile_repos</code></td><td>Name, avatar, public repository list. Refreshed after 6 hours; see below.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>The lookup cache can't grow forever</h3>
+            <p>Every hour the server deletes cached lookups that:</p>
+            <ul class="doc-list">
+              <li>nobody has opened for 30 days (a view is recorded at most once an hour per profile),</li>
+              <li>never finished, unless they are running right now,</li>
+              <li>fall outside the 200 most recently opened.</li>
+            </ul>
+            <p>
+              At roughly 0.2 to 0.7 MB each, that keeps lookups under about 140 MB, so they can't crowd owners' traffic out
+              of a small database. Both limits are settings (<code>PUBLIC_PROFILE_TTL_DAYS</code>,
+              <code>PUBLIC_MAX_PROFILES</code>) on your own deployment.
+            </p>
+            <h3>Leaving</h3>
+            <ul class="doc-list">
+              <li><strong>Delete my data</strong> uninstalls the app through GitHub's API first (so the next collection can't re-create anything), then deletes your installations, their stats, your account and your sessions. A collection running at that moment is cancelled and its writes cleaned up.</li>
+              <li><strong>Uninstalling on GitHub</strong> deletes your data on the next collection run.</li>
+              <li><strong>Removing one repository</strong> from the installation deletes that repository's traffic on the next run.</li>
+            </ul>
+          </section>
+
+          <!-- ============ Security ============ -->
+          <section class="doc-section" id="security">
+            <h2>Security model and rate limits</h2>
+            <p>The private parts of RepoLedger are your traffic and your session. These rules protect them.</p>
+            <dl class="terms">
+              <div class="term"><dt>Your repositories only</dt><dd>Owner endpoints answer only for repositories in your own, non-suspended installations. Asking for another repository by name just filters it out.</dd></div>
+              <div class="term"><dt>Strict browser policy</dt><dd>A Content-Security-Policy allows scripts only from RepoLedger itself and images only from itself and GitHub avatars, and blocks framing by other sites.</dd></div>
+              <div class="term"><dt>Cross-site requests</dt><dd>Every state-changing request (sign out, Collect now, Delete my data) must carry RepoLedger's own <code>Origin</code> or <code>Referer</code>.</dd></div>
+              <div class="term"><dt>Nothing cached</dt><dd>API and sign-in responses are marked <code>no-store</code>, so no browser or proxy keeps a copy of private traffic.</dd></div>
+              <div class="term"><dt>Tokens stay home</dt><dd>GitHub tokens are only ever sent to <code>api.github.com</code>, even when following pagination links, and every GitHub request times out after 20 seconds.</dd></div>
+              <div class="term"><dt>Other headers</dt><dd><code>nosniff</code>, same-origin referrers and opener policy, and HSTS when served over HTTPS. Request bodies are capped at 10 KB.</dd></div>
+            </dl>
+            <h3>Rate limits</h3>
+            <p>
+              Limits count per network: an IPv4 address, or an IPv6 /56 block, since one customer usually gets a whole
+              IPv6 range and could otherwise dodge limits by rotating addresses. They are fixed one-minute or one-hour
+              windows held in memory.
+            </p>
+            <div class="doc-table">
+              <table>
+                <thead><tr><th>What</th><th>Limit</th><th>Per</th></tr></thead>
+                <tbody>
+                  <tr><td>Sign-in (<code>/auth/login</code>, <code>/auth/callback</code>)</td><td>30 a minute</td><td>Network</td></tr>
+                  <tr><td>API requests (<code>/api/*</code>, <code>/readyz</code>)</td><td>600 a minute</td><td>Network</td></tr>
+                  <tr><td>New username lookups</td><td>30 an hour</td><td>Network</td></tr>
+                  <tr><td>Lookups running at once</td><td>3, others wait</td><td>Server</td></tr>
+                  <tr><td>Collect now</td><td>1 a minute, none within 10 minutes of the last collection</td><td>User</td></tr>
+                  <tr><td>GitHub lookup budget</td><td>Stops at 10% of the hourly limit (at most 300 kept back)</td><td>Server</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="fine">The API and lookup limits are settings (<code>RATE_LIMIT_API_PER_MIN</code>, <code>RATE_LIMIT_LOOKUPS_PER_HOUR</code>, <code>PUBLIC_LOOKUP_CONCURRENCY</code>). Because limits and lookup progress live in memory, RepoLedger is meant to run as a single instance.</p>
+          </section>
+
+          <!-- ============ Self-host ============ -->
+          <section class="doc-section" id="self-host">
+            <h2>Run your own</h2>
+            <p>
+              RepoLedger needs Node.js 20 or newer and a PostgreSQL database. <code>npm run init-db</code> creates the
+              tables, and <code>npm run create-app</code> creates your own GitHub App with the read-only permissions above
+              and saves its keys to <code>.env</code>. A <code>Dockerfile</code> is included for hosting.
+            </p>
+            <div class="card next-card">
+              <div>
+                <h3>Deploy on AWS</h3>
+                <p>A step-by-step guide: one EC2 server with HTTPS, a private RDS database, secrets in Parameter Store and the collector on cron.</p>
+              </div>
+              <a class="btn btn-secondary" href="/deploy">Open the guide<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <span class="brand brand-sm">
+          <svg class="brand-mark" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor"/><rect x="8" y="17" width="4" height="7" rx="1" fill="#fff"/><rect x="14" y="12" width="4" height="12" rx="1" fill="#fff"/><rect x="20" y="8" width="4" height="16" rx="1" fill="#fff"/></svg>
+          RepoLedger
+        </span>
+        <nav class="footer-links" aria-label="Footer">
+          <a href="/how-it-works">How it works</a>
+          <a href="/deploy">Deploy on AWS</a>
+        </nav>
+        <span>Data from the GitHub REST API. Not affiliated with GitHub.</span>
+      </div>
+    </footer>
+
+    <script src="/site.js"></script>
+  </body>
+</html>

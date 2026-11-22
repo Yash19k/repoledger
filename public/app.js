@@ -819,7 +819,9 @@
 
   function showOnly(id) {
     for (const v of ["landing", "onboard", "dashboard"]) $(v).hidden = v !== id;
-    $("nav-links").hidden = id !== "landing";
+    // In-page links only exist on the landing page; the signed-in app keeps a compact one-row header on phones.
+    for (const a of document.querySelectorAll(".nav-landing")) a.hidden = id !== "landing";
+    $("masthead").classList.toggle("compact", id !== "landing");
     $("boot").hidden = true;
     $("masthead").hidden = false;
     $("colophon").hidden = false;

@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deploy on AWS · RepoLedger</title>
+    <meta name="description" content="Deploy RepoLedger on AWS step by step: one EC2 server with Docker Compose and automatic HTTPS, a private RDS PostgreSQL database (or Supabase), secrets in Parameter Store and the collector on cron." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><rect x='8' y='17' width='4' height='7' rx='1' fill='white'/><rect x='14' y='12' width='4' height='12' rx='1' fill='white'/><rect x='20' y='8' width='4' height='16' rx='1' fill='white'/></svg>" />
+    <script src="/theme-init.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/docs.css" />
+  </head>
+  <body>
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+      <symbol id="i-term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol>
+      <symbol id="i-pc" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+    </svg>
+
+    <header class="nav" id="masthead">
+      <div class="wrap nav-inner">
+        <a class="brand" href="/" aria-label="RepoLedger home">
+          <svg class="brand-mark" viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor"/><rect x="8" y="17" width="4" height="7" rx="1" fill="#fff"/><rect x="14" y="12" width="4" height="12" rx="1" fill="#fff"/><rect x="20" y="8" width="4" height="16" rx="1" fill="#fff"/></svg>
+          <span>RepoLedger</span>
+        </a>
+        <nav class="nav-links" aria-label="Site">
+          <a href="/how-it-works">How it works</a>
+          <a href="/deploy" aria-current="page">Deploy on AWS</a>
+        </nav>
+        <div class="nav-right">
+          <div class="masthead-actions" id="masthead-actions"><a class="btn btn-primary btn-sm" href="/auth/login">Sign in with GitHub</a></div>
+          <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch theme"></button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="wrap doc-head">
+        <p class="doc-kicker">Deploy on AWS</p>
+        <h1>Deploy RepoLedger on AWS, step by step</h1>
+        <p class="doc-lede">
+          You will run RepoLedger on one EC2 server with HTTPS, a private RDS PostgreSQL database and encrypted secrets.
+          Each step explains what you are building and why, so you learn the concepts, not just the clicks.
+        </p>
+        <ul class="doc-meta">
+          <li><svg class="i"><use href="#i-clock"/></svg>About 3 hours</li>
+          <li><svg class="i"><use href="#i-server"/></svg>EC2 · RDS · IAM · Parameter Store</li>
+          <li><svg class="i"><use href="#i-pin"/></svg>Region <span class="v" data-v="region">ap-south-1</span></li>
+        </ul>
+      </section>
+
+      <div class="wrap">
+        <form class="card values" id="values" autocomplete="off">
+          <div class="values-head">
+            <h2>Your values</h2>
+            <p>Fill these in as you get them. Every highlighted value in the commands updates to match. Saved in this browser only.</p>
+          </div>
+          <div class="fields">
+            <div class="field">
+              <label class="label" for="val-ip">Elastic IP (Step 3)</label>
+              <input type="text" id="val-ip" placeholder="13.233.10.20" inputmode="decimal" spellcheck="false" />
+              <small>Your site: <span class="v" data-v="host">13-233-10-20.sslip.io</span></small>
+            </div>
+            <div class="field">
+              <label class="label" for="val-account">AWS account ID (12 digits)</label>
+              <input type="text" id="val-account" placeholder="123456789012" inputmode="numeric" spellcheck="false" />
+            </div>
+            <div class="field">
+              <label class="label" for="val-region">AWS region</label>
+              <input type="text" id="val-region" placeholder="ap-south-1" spellcheck="false" />
+              <small>The code you see in the console's region picker.</small>
+            </div>
+            <div class="field wide only-rds">
+              <label class="label" for="val-endpoint">RDS endpoint (Step 2)</label>
+              <input type="text" id="val-endpoint" placeholder="repoledger-db.abc123xyz.ap-south-1.rds.amazonaws.com" spellcheck="false" />
+            </div>
+            <div class="field wide">
+              <label class="label" for="val-repo">Your fork's clone URL (Step 0)</label>
+              <input type="text" id="val-repo" placeholder="https://github.com/your-name/repoledger.git" spellcheck="false" />
+            </div>
+          </div>
+          <div class="switches">
+            <div class="control">
+              <span class="label" id="db-label">Database</span>
+              <div class="segmented" role="radiogroup" aria-labelledby="db-label" data-switch="db">
+                <button type="button" role="radio" data-value="rds" aria-checked="true">AWS RDS</button>
+                <button type="button" role="radio" data-value="supabase" aria-checked="false">Supabase</button>
+              </div>
+              <small class="only-rds">The full AWS path. Recommended for learning.</small>
+              <small class="only-supa">Cheaper: keeps the database on Supabase and skips Step 2.</small>
+            </div>
+            <div class="control">
+              <span class="label" id="os-label">Your computer</span>
+              <div class="segmented" role="radiogroup" aria-labelledby="os-label" data-switch="os">
+                <button type="button" role="radio" data-value="windows" aria-checked="true">Windows</button>
+                <button type="button" role="radio" data-value="unix" aria-checked="false">macOS or Linux</button>
+              </div>
+              <small>Changes the commands you run on your own machine.</small>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="wrap doc-layout">
+        <nav class="doc-rail" aria-label="Steps" data-rail>
+          <div class="doc-progress">
+            <div class="doc-progress-top"><span>Progress</span><strong id="progress-text">0 of 9 steps</strong></div>
+            <div class="bar" role="progressbar" aria-labelledby="progress-text" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar-wrap"><span id="progress-bar"></span></div>
+          </div>
+          <ol id="rail">
+            <li><a href="#overview"><span class="rail-n"><b>·</b></span>The big picture</a></li>
+            <li><a href="#concepts"><span class="rail-n"><b>·</b></span>Concepts</a></li>
+            <li class="sep" aria-hidden="true"></li>
+            <li><a href="#s0" data-step="s0"><span class="rail-n"><b>0</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Account safety</a></li>
+            <li><a href="#s1" data-step="s1"><span class="rail-n"><b>1</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Firewalls</a></li>
+            <li class="only-rds"><a href="#s2" data-step="s2"><span class="rail-n"><b>2</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Database</a></li>
+            <li><a href="#s3" data-step="s3"><span class="rail-n"><b>3</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Launch server</a></li>
+            <li><a href="#s4" data-step="s4"><span class="rail-n"><b>4</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Install Docker</a></li>
+            <li><a href="#s5" data-step="s5"><span class="rail-n"><b>5</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>GitHub App</a></li>
+            <li><a href="#s6" data-step="s6"><span class="rail-n"><b>6</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Secrets + IAM role</a></li>
+            <li><a href="#s7" data-step="s7"><span class="rail-n"><b>7</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Run it</a></li>
+            <li><a href="#s8" data-step="s8"><span class="rail-n"><b>8</b><svg class="i" width="12" height="12"><use href="#i-check"/></svg></span>Collector</a></li>
+            <li class="sep" aria-hidden="true"></li>
+            <li><a href="#verify"><span class="rail-n"><b>·</b></span>Verify and debug</a></li>
+            <li><a href="#costs"><span class="rail-n"><b>·</b></span>Costs and cleanup</a></li>
+          </ol>
+        </nav>
+
+        <div class="doc-main doc-steps">
+          <!-- ================= OVERVIEW ================= -->
+          <section class="card doc-card" id="overview">
+            <div class="step-head plain">
+              <div><h2>The big picture</h2>
+              <p class="step-learn">One EC2 server runs two containers. The database is private. Secrets come from Parameter Store.</p></div>
+            </div>
+            <div class="diagram" role="img" aria-label="Architecture: the visitor's browser reaches Caddy on the EC2 server over HTTPS; Caddy proxies to the Express app; the app and the cron collector talk to GitHub and to the private RDS database; Parameter Store supplies the server's settings through an IAM role.">
+              <svg viewBox="0 0 760 340">
+                <defs><marker id="dp-a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="d-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+                <rect class="d-zone" x="200" y="20" width="320" height="292" rx="10"/>
+                <text class="d-t" x="216" y="46">EC2 t3.micro · Elastic IP</text>
+                <text class="d-s" x="216" y="64">Docker Compose runs all three</text>
+                <path class="d-line" d="M164 112H214" marker-end="url(#dp-a1)"/>
+                <path class="d-line" d="M360 140V158" marker-end="url(#dp-a1)"/>
+                <path class="d-line" d="M504 200H566" marker-end="url(#dp-a1)"/>
+                <path class="d-line" d="M504 176H540V68H566" marker-end="url(#dp-a1)"/>
+                <path class="d-line" d="M504 264H652V226" marker-end="url(#dp-a1)"/>
+                <path class="d-ret" d="M164 268H198" marker-end="url(#dp-a1)"/>
+                <rect class="d-main" x="216" y="84" width="288" height="56" rx="8"/>
+                <text class="d-t" x="360" y="108" text-anchor="middle">Caddy</text>
+                <text class="d-s" x="360" y="125" text-anchor="middle">HTTPS on 443, automatic certificates</text>
+                <rect class="d-box" x="216" y="160" width="288" height="56" rx="8"/>
+                <text class="d-t" x="360" y="184" text-anchor="middle">web · Express on :8600</text>
+                <text class="d-s" x="360" y="201" text-anchor="middle">serves the site and the API</text>
+                <rect class="d-box" x="216" y="236" width="288" height="56" rx="8"/>
+                <text class="d-t" x="360" y="260" text-anchor="middle">collector · cron every 6 h</text>
+                <text class="d-s" x="360" y="277" text-anchor="middle">same image: reads GitHub, writes the DB</text>
+                <rect class="d-box" x="24" y="84" width="140" height="56" rx="8"/>
+                <text class="d-t" x="94" y="108" text-anchor="middle">Visitor's browser</text>
+                <text class="d-s" x="94" y="125" text-anchor="middle">anyone on the web</text>
+                <rect class="d-box" x="24" y="232" width="140" height="72" rx="8"/>
+                <text class="d-t" x="94" y="256" text-anchor="middle">Parameter Store</text>
+                <text class="d-s" x="94" y="273" text-anchor="middle">secrets for .env</text>
+                <text class="d-s" x="94" y="289" text-anchor="middle">read via IAM role</text>
+                <rect class="d-box" x="568" y="32" width="168" height="72" rx="8"/>
+                <text class="d-t" x="652" y="56" text-anchor="middle">GitHub</text>
+                <text class="d-s" x="652" y="73" text-anchor="middle">API: lookups, stats</text>
+                <text class="d-s" x="652" y="89" text-anchor="middle">App: sign-in</text>
+                <rect class="d-box" x="568" y="152" width="168" height="72" rx="8"/>
+                <text class="d-t" x="652" y="176" text-anchor="middle">RDS PostgreSQL</text>
+                <text class="d-s" x="652" y="193" text-anchor="middle">no public IP</text>
+                <text class="d-s" x="652" y="209" text-anchor="middle">5432 from web-sg only</text>
+                <text class="d-l" x="182" y="102" text-anchor="middle">HTTPS</text>
+                <text class="d-l" x="368" y="154">proxy</text>
+                <text class="d-l" x="546" y="194" text-anchor="middle">TLS</text>
+              </svg>
+            </div>
+            <p class="diagram-caption">The internet reaches only ports 80 and 443 on the server. The database accepts connections only from machines in the server's security group.</p>
+
+            <div class="phases">
+              <a class="phase" href="#s1"><span class="phase-steps">Steps 1–2</span><strong>Database</strong><span>Security groups, private RDS</span><em>gives: DB endpoint</em></a>
+              <a class="phase" href="#s3"><span class="phase-steps">Steps 3–4</span><strong>Server</strong><span>EC2, Elastic IP, Docker</span><em>gives: HTTPS address</em></a>
+              <a class="phase" href="#s5"><span class="phase-steps">Steps 5–6</span><strong>Secrets</strong><span>GitHub App, Parameter Store, role</span><em>gives: .env on server</em></a>
+              <a class="phase last" href="#s7"><span class="phase-steps">Steps 7–8</span><strong>Run it</strong><span>Compose, Caddy, tables, collector</span><em>result: live site</em></a>
+            </div>
+
+            <div class="doc-table"><table>
+              <thead><tr><th>Part of RepoLedger</th><th>Where it runs</th><th>Step</th></tr></thead>
+              <tbody>
+                <tr><td>Website + API (<code>server.js</code>, <code>public/</code>)</td><td>Docker container on EC2</td><td>3, 4, 7</td></tr>
+                <tr><td>HTTPS</td><td>Caddy container on the same EC2</td><td>7</td></tr>
+                <tr><td>Database (PostgreSQL)</td><td><span class="only-rds">RDS, private</span><span class="only-supa">Supabase</span></td><td><span class="only-rds">1, 2</span><span class="only-supa">–</span></td></tr>
+                <tr><td>Collector (<code>src/collector.js</code>)</td><td><span class="only-rds">cron on EC2 (instead of GitHub Actions)</span><span class="only-supa">GitHub Actions, as in the repository</span></td><td>8</td></tr>
+                <tr><td>Secrets</td><td>SSM Parameter Store, read through an IAM role</td><td>6</td></tr>
+                <tr><td>GitHub App</td><td>GitHub, pointing at your HTTPS address</td><td>5</td></tr>
+              </tbody>
+            </table></div>
+          </section>
+
+          <!-- ================= CONCEPTS ================= -->
+          <section class="card doc-card" id="concepts">
+            <div class="step-head plain">
+              <div><h2>Concepts to understand first</h2>
+              <p class="step-learn">You deploy a long-running server, not functions. Every later step uses these ideas.</p></div>
+            </div>
+            <h3>Why EC2 and not Lambda</h3>
+            <p>RepoLedger is a classic long-running server. It keeps rate limits and lookup progress in memory, runs hourly cleanup with <code>setInterval</code>, and expects exactly one instance. Lambda starts and stops copies of your code per request, which breaks all three.</p>
+            <div class="doc-table"><table>
+              <thead><tr><th>Option</th><th>You manage</th><th>Fits as written?</th><th>Cost</th></tr></thead>
+              <tbody>
+                <tr class="pick"><td><strong>EC2 + Docker</strong> (this guide)</td><td>The VM, Docker, HTTPS proxy</td><td class="yes">Yes</td><td>Free-tier instance type</td></tr>
+                <tr><td>Lambda + API Gateway</td><td>Only code</td><td class="no">Needs a rewrite</td><td>Near zero</td></tr>
+                <tr><td>App Runner / ECS Fargate</td><td>Only the container</td><td class="yes">Yes</td><td>No free tier</td></tr>
+                <tr><td>Elastic Beanstalk</td><td>Little</td><td class="yes">Yes</td><td>Same as EC2, hides the learning</td></tr>
+              </tbody>
+            </table></div>
+
+            <h3>The AWS building blocks</h3>
+            <dl class="terms">
+              <div class="term"><dt>Region</dt><dd><code class="v" data-v="region">ap-south-1</code> in this guide. Keep the console's region picker on it, or your resources seem to vanish.</dd></div>
+              <div class="term"><dt>VPC</dt><dd>Your private network in AWS. Each region has a default VPC with public subnets; we use it.</dd></div>
+              <div class="term"><dt>EC2 instance</dt><dd>A virtual machine rented by the hour. Its size is the instance type, its OS image is the AMI.</dd></div>
+              <div class="term"><dt>EBS volume</dt><dd>The instance's disk. Survives reboots, deleted when the instance is terminated.</dd></div>
+              <div class="term"><dt>Security group</dt><dd>A firewall listing allowed inbound traffic. A rule's source can be another group: "anything wearing that group".</dd></div>
+              <div class="term"><dt>Elastic IP</dt><dd>A fixed public IPv4 address. The GitHub App's callback URL needs one that never changes.</dd></div>
+              <div class="term"><dt>RDS</dt><dd>AWS runs PostgreSQL for you, with backups and patching. You connect to its endpoint hostname.</dd></div>
+              <div class="term"><dt>IAM role</dt><dd>Permissions a service wears. An EC2 instance with a role gets short-lived credentials, so no keys sit on disk.</dd></div>
+              <div class="term"><dt>Parameter Store</dt><dd>Free key-value config store. SecureString values are encrypted with KMS.</dd></div>
+              <div class="term"><dt>CloudWatch and Budgets</dt><dd>Metrics, logs and alarms; Budgets emails you when spending passes a limit.</dd></div>
+              <div class="term"><dt>Image vs container</dt><dd>The <code>Dockerfile</code> is a recipe, <code>docker build</code> bakes an image, <code>docker run</code> starts a container.</dd></div>
+              <div class="term"><dt>Reverse proxy</dt><dd>Receives internet traffic and forwards it to the app. Caddy also fetches and renews free HTTPS certificates.</dd></div>
+            </dl>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p><strong>Why HTTPS is required.</strong> RepoLedger marks its session cookie <code>Secure</code> when <code>PUBLIC_URL</code> starts with <code>https://</code>, and GitHub sign-in redirects back to that URL. Certificates need a name, not a bare IP: <code>sslip.io</code> is free public DNS where <code>13-233-10-20.sslip.io</code> resolves to <code>13.233.10.20</code>, so you need no domain.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 0 ================= -->
+          <section class="card doc-card" id="s0" data-step="s0">
+            <div class="step-head">
+              <span class="step-badge">0</span>
+              <div><h2>Account safety first</h2><p class="step-learn">Learn: budgets, MFA, why you never work as root</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s0" /> Done</label>
+            </div>
+            <p>A server and a database bill every hour they exist, unlike Lambda. Set a spending alarm before you create anything.</p>
+            <ol class="doc-list">
+              <li><strong>Check your free tier.</strong> <em class="ui">Billing and Cost Management → Free Tier</em>. Newer accounts get a credit-based free plan; older ones have the 12-month free tier (750 h/month of <code>t3.micro</code> and <code>db.t4g.micro</code>).</li>
+              <li><strong>Create a budget.</strong> <em class="ui">Billing → Budgets → Create budget → Monthly cost budget</em>, $5, your email. AWS emails you at 85% and 100%.</li>
+              <li><strong>Don't use the root user.</strong> Sign in as an IAM user (or IAM Identity Center user) with MFA turned on.</li>
+              <li><strong>Switch the region</strong> to <code class="v" data-v="region">ap-south-1</code> in the console's top-right picker and keep it there.</li>
+              <li><strong>Local tools:</strong> Git and an SSH client. <span class="only-win">Windows includes OpenSSH: check with <code>ssh -V</code> in PowerShell.</span><span class="only-unix">macOS and Linux include it: check with <code>ssh -V</code>.</span> The AWS CLI comes preinstalled on the server.</li>
+              <li><strong>Get the code on GitHub.</strong> Fork the RepoLedger repository<span id="source-fork" hidden> (<a id="source-fork-link" href="#" rel="noopener">source</a>)</span> and put your fork's clone URL in <strong>Your values</strong>. The server clones it in Step 4; a public fork clones without credentials.</li>
+              <li><strong>Get a lookup token:</strong> GitHub → <em class="ui">Settings → Developer settings → Fine-grained tokens</em>, public repositories read-only, no other permissions.</li>
+            </ol>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p>The budget, MFA and a non-root user are the three habits every AWS engineer sets up on day one. Most surprise bills come from a forgotten resource, not traffic.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 1 ================= -->
+          <section class="card doc-card" id="s1" data-step="s1">
+            <div class="step-head">
+              <span class="step-badge">1</span>
+              <div><h2>Create the firewalls</h2><p class="step-learn">Learn: security groups, group-to-group rules, stateful firewalls</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s1" /> Done</label>
+            </div>
+            <p><em class="ui">EC2 → Network &amp; Security → Security Groups → Create security group</em>, default VPC.</p>
+            <h3><code>repoledger-web-sg</code> · for the server</h3>
+            <div class="doc-table"><table>
+              <thead><tr><th>Type</th><th>Port</th><th>Source</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr><td>SSH</td><td>22</td><td>My IP</td><td>Only your computer can log in</td></tr>
+                <tr><td>HTTP</td><td>80</td><td>Anywhere-IPv4</td><td>Let's Encrypt checks it; Caddy redirects it to HTTPS</td></tr>
+                <tr><td>HTTPS</td><td>443</td><td>Anywhere-IPv4</td><td>The website</td></tr>
+              </tbody>
+            </table></div>
+            <h3 class="only-rds"><code>repoledger-db-sg</code> · for the database</h3>
+            <div class="doc-table only-rds"><table>
+              <thead><tr><th>Type</th><th>Port</th><th>Source</th><th>Why</th></tr></thead>
+              <tbody><tr><td>PostgreSQL</td><td>5432</td><td><code>repoledger-web-sg</code></td><td>Only machines wearing the web group connect</td></tr></tbody>
+            </table></div>
+            <div class="diagram only-rds" role="img" aria-label="Your laptop reaches the server on port 22, the internet on 80 and 443; the server reaches the database on 5432; the internet cannot reach the database.">
+              <svg viewBox="0 0 760 270">
+                <defs><marker id="dp-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="d-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+                <rect class="d-main" x="264" y="20" width="200" height="184" rx="10"/>
+                <text class="d-t" x="364" y="46" text-anchor="middle">repoledger-web-sg</text>
+                <rect class="d-zone" x="552" y="20" width="184" height="184" rx="10"/>
+                <text class="d-t" x="644" y="46" text-anchor="middle">repoledger-db-sg</text>
+                <path class="d-line" d="M184 68H230V100H278" marker-end="url(#dp-a2)"/>
+                <path class="d-line" d="M184 156H230V124H278" marker-end="url(#dp-a2)"/>
+                <path class="d-line" d="M448 112H566" marker-end="url(#dp-a2)"/>
+                <path class="d-bad" d="M104 184V236H644V218"/>
+                <path class="d-x" d="M638 200L650 212M650 200L638 212"/>
+                <rect class="d-box" x="24" y="40" width="160" height="56" rx="8"/>
+                <text class="d-t" x="104" y="64" text-anchor="middle">Your laptop</text>
+                <text class="d-s" x="104" y="81" text-anchor="middle">your IP only</text>
+                <rect class="d-box" x="24" y="128" width="160" height="56" rx="8"/>
+                <text class="d-t" x="104" y="152" text-anchor="middle">The internet</text>
+                <text class="d-s" x="104" y="169" text-anchor="middle">any IP address</text>
+                <rect class="d-box" x="280" y="84" width="168" height="56" rx="8"/>
+                <text class="d-t" x="364" y="108" text-anchor="middle">EC2 server</text>
+                <text class="d-s" x="364" y="125" text-anchor="middle">Caddy + app</text>
+                <rect class="d-box" x="568" y="84" width="152" height="56" rx="8"/>
+                <text class="d-t" x="644" y="108" text-anchor="middle">RDS database</text>
+                <text class="d-s" x="644" y="125" text-anchor="middle">PostgreSQL</text>
+                <text class="d-l" x="207" y="60" text-anchor="middle">SSH 22</text>
+                <text class="d-l" x="207" y="174" text-anchor="middle">80, 443</text>
+                <text class="d-l" x="508" y="104" text-anchor="middle">5432</text>
+                <text class="d-r" x="374" y="228" text-anchor="middle">5432 straight from the internet: blocked</text>
+              </svg>
+            </div>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p>Security groups are <strong>stateful</strong>: replies to allowed traffic leave automatically, so outbound stays "all traffic". The database rule names a <strong>group</strong>, not an IP, so a replacement server with the same group still works. "My IP" changes when your network does; if SSH suddenly times out, check that rule first.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 2 ================= -->
+          <section class="card doc-card only-rds" id="s2" data-step="s2">
+            <div class="step-head">
+              <span class="step-badge">2</span>
+              <div><h2>Create the RDS database</h2><p class="step-learn">Learn: managed databases, private endpoints, TLS verification</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s2" /> Done</label>
+            </div>
+            <p><em class="ui">RDS → Databases → Create database</em>. Set these and leave the rest at defaults:</p>
+            <div class="doc-table"><table>
+              <thead><tr><th>Setting</th><th>Value</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr><td>Creation method</td><td>Full configuration</td><td>So you see every option</td></tr>
+                <tr><td>Engine</td><td>PostgreSQL, latest 17.x</td><td>The app uses plain <code>pg</code></td></tr>
+                <tr><td>Template</td><td><strong>Free tier</strong></td><td>Hides the expensive Multi-AZ options</td></tr>
+                <tr><td>DB instance identifier</td><td><code>repoledger-db</code></td><td></td></tr>
+                <tr><td>Master username</td><td><code>repoledger_admin</code></td><td></td></tr>
+                <tr><td>Credentials</td><td>Self managed password</td><td>Letters and digits only, 20+ characters, so it needs no URL escaping</td></tr>
+                <tr><td>Instance class</td><td><code>db.t4g.micro</code></td><td>Smallest, free-tier eligible</td></tr>
+                <tr><td>Storage</td><td>gp3, 20 GiB, autoscaling off</td><td>The app caps its lookup cache near 140 MB</td></tr>
+                <tr><td>Compute resource</td><td>Don't connect to EC2</td><td>We wire it by hand to learn how</td></tr>
+                <tr><td>Public access</td><td><strong>No</strong></td><td>Reachable only inside the VPC</td></tr>
+                <tr><td>Security group</td><td><code>repoledger-db-sg</code> (remove <code>default</code>)</td><td>Step 1's firewall</td></tr>
+                <tr><td>Initial database name</td><td><code>repoledger</code></td><td>Under <em class="ui">Additional configuration</em>; otherwise none is created</td></tr>
+                <tr><td>Backup retention</td><td>7 days</td><td>Free daily snapshots</td></tr>
+                <tr><td>Performance Insights</td><td>Off</td><td>Avoids extra charges</td></tr>
+              </tbody>
+            </table></div>
+            <p>It takes 5 to 10 minutes. When it says <em class="ui">Available</em>, copy the <strong>Endpoint</strong> from <em class="ui">Connectivity &amp; security</em> into <strong>Your values</strong> at the top. Your connection string:</p>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-file"/></svg><span>DATABASE_URL</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>postgresql://repoledger_admin:YOUR_PASSWORD@<span class="v" data-v="endpoint">repoledger-db.abc123xyz.ap-south-1.rds.amazonaws.com</span>:5432/repoledger</code></pre></div>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p><strong>TLS to the database.</strong> RDS for PostgreSQL 15+ requires encryption, which RepoLedger does by default. To also <em>verify</em> the server's certificate, the app reads <code>DATABASE_SSL_CA</code>. You download AWS's CA bundle onto the server in Step 7.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 3 ================= -->
+          <section class="card doc-card" id="s3" data-step="s3">
+            <div class="step-head">
+              <span class="step-badge">3</span>
+              <div><h2>Launch the server</h2><p class="step-learn">Learn: AMIs, instance types, key pairs, Elastic IPs</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s3" /> Done</label>
+            </div>
+            <p><em class="ui">EC2 → Instances → Launch instances</em>:</p>
+            <div class="doc-table"><table>
+              <thead><tr><th>Setting</th><th>Value</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr><td>Name</td><td><code>repoledger-server</code></td><td></td></tr>
+                <tr><td>AMI</td><td>Amazon Linux 2023, 64-bit (x86)</td><td>AWS CLI preinstalled</td></tr>
+                <tr><td>Instance type</td><td><code>t3.micro</code></td><td>1 GiB RAM is enough</td></tr>
+                <tr><td>Key pair</td><td>New → <code>repoledger-key</code>, RSA, <code>.pem</code></td><td>Downloads once. Lose it, lose SSH</td></tr>
+                <tr><td>Network</td><td>Default VPC, auto-assign public IP on</td><td></td></tr>
+                <tr><td>Firewall</td><td>Existing → <code>repoledger-web-sg</code></td><td>Step 1</td></tr>
+                <tr><td>Storage</td><td>20 GiB gp3</td><td>Free tier covers 30 GiB</td></tr>
+                <tr><td>Metadata version</td><td>V2 only</td><td>Blocks a credential-theft trick</td></tr>
+              </tbody>
+            </table></div>
+            <p><strong>Give it a fixed address:</strong> <em class="ui">EC2 → Elastic IPs → Allocate</em>, then <em class="ui">Actions → Associate</em> with <code>repoledger-server</code>. Put the IP in <strong>Your values</strong>; your site becomes <span class="v" data-v="host">13-233-10-20.sslip.io</span>.</p>
+            <div class="callout warn"><svg class="i"><use href="#i-alert"/></svg><div><p>Every public IPv4 address costs about $0.005 an hour. An Elastic IP <strong>not</strong> attached to a running instance still bills, so release it when you tear down.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 4 ================= -->
+          <section class="card doc-card" id="s4" data-step="s4">
+            <div class="step-head">
+              <span class="step-badge">4</span>
+              <div><h2>Connect and install Docker</h2><p class="step-learn">Learn: SSH keys, Linux services, swap memory</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s4" /> Done</label>
+            </div>
+            <p>SSH refuses a key that other users can read, so lock it down first.</p>
+            <div class="code only-win"><div class="code-head"><span class="where"><svg class="i"><use href="#i-pc"/></svg><span>PowerShell · your computer</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>mkdir $HOME\.ssh -Force
+move $HOME\Downloads\repoledger-key.pem $HOME\.ssh\
+icacls "$HOME\.ssh\repoledger-key.pem" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+ssh -i $HOME\.ssh\repoledger-key.pem ec2-user@<span class="v" data-v="ip">13.233.10.20</span></code></pre></div>
+            <div class="code only-unix"><div class="code-head"><span class="where"><svg class="i"><use href="#i-pc"/></svg><span>Terminal · your computer</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>mkdir -p ~/.ssh
+mv ~/Downloads/repoledger-key.pem ~/.ssh/
+chmod 400 ~/.ssh/repoledger-key.pem
+ssh -i ~/.ssh/repoledger-key.pem ec2-user@<span class="v" data-v="ip">13.233.10.20</span></code></pre></div>
+            <p>Type <code>yes</code> at the fingerprint question. Now you're on the server:</p>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code><span class="c"># 1. Update the OS and install Docker, Git and cron</span>
+sudo dnf update -y
+sudo dnf install -y docker git cronie
+sudo systemctl enable --now docker crond   <span class="c"># start now and on every boot</span>
+sudo usermod -aG docker ec2-user           <span class="c"># run docker without sudo</span>
+
+<span class="c"># 2. Docker Compose plugin (not packaged on AL2023)</span>
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+<span class="c"># 3. 1 GiB swap so npm installs never run out of memory</span>
+sudo dd if=/dev/zero of=/swapfile bs=1M count=1024
+sudo chmod 600 /swapfile &amp;&amp; sudo mkswap /swapfile &amp;&amp; sudo swapon /swapfile
+echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+
+<span class="c"># 4. Get the code</span>
+git clone <span class="v" data-v="repo">https://github.com/your-name/repoledger.git</span> ~/repoledger</code></pre></div>
+            <p>Type <code>exit</code> and SSH in again so the <code>docker</code> group applies. Then <code>docker version</code> and <code>docker compose version</code> must both answer without <code>sudo</code>.</p>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p><code>systemctl enable --now</code> is how Linux services survive reboots. Swap is disk used as overflow memory: slow, but it turns an out-of-memory crash into a short slowdown.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 5 ================= -->
+          <section class="card doc-card" id="s5" data-step="s5">
+            <div class="step-head">
+              <span class="step-badge">5</span>
+              <div><h2>Create the production GitHub App</h2><p class="step-learn">Learn: OAuth callbacks, app private keys, keeping dev and prod apart</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s5" /> Done</label>
+            </div>
+            <p>Use a <strong>separate app</strong> for production. If you also run RepoLedger locally, that app keeps working, and a leaked dev key can't touch production. Don't use <code>npm run create-app</code> here: it overwrites your local <code>.env</code>.</p>
+            <p>App names are unique across all of GitHub, so pick one nobody else has, such as <code>RepoLedger-yourname</code>.</p>
+            <p>GitHub → <em class="ui">Settings → Developer settings → GitHub Apps → New GitHub App</em>:</p>
+            <div class="doc-table"><table>
+              <thead><tr><th>Field</th><th>Value</th></tr></thead>
+              <tbody>
+                <tr><td>GitHub App name</td><td>Your unique name, e.g. <code>RepoLedger-yourname</code></td></tr>
+                <tr><td>Homepage URL</td><td><code>https://<span class="v" data-v="host">13-233-10-20.sslip.io</span></code></td></tr>
+                <tr><td>Callback URL</td><td><code>https://<span class="v" data-v="host">13-233-10-20.sslip.io</span>/auth/callback</code></td></tr>
+                <tr><td>Request user authorization during installation</td><td>Unticked</td></tr>
+                <tr><td>Setup URL</td><td><code>https://<span class="v" data-v="host">13-233-10-20.sslip.io</span>/auth/installed</code> and tick <em class="ui">Redirect on update</em></td></tr>
+                <tr><td>Webhook → Active</td><td><strong>Unticked</strong></td></tr>
+                <tr><td>Repository permissions</td><td>Administration, Issues, Pull requests, Metadata: all Read-only</td></tr>
+                <tr><td>Where can it be installed?</td><td>Any account</td></tr>
+              </tbody>
+            </table></div>
+            <p>After <strong>Create GitHub App</strong>: copy the <strong>App ID</strong> and <strong>Client ID</strong>, note the <strong>slug</strong> from <code>github.com/apps/&lt;slug&gt;</code>, generate a <strong>client secret</strong> (shown once) and a <strong>private key</strong> (a <code>.pem</code> file downloads).</p>
+            <p>Each setting must fit on one line. RepoLedger turns a literal <code>\n</code> back into line breaks, so flatten the key and copy it:</p>
+            <div class="code only-win"><div class="code-head"><span class="where"><svg class="i"><use href="#i-pc"/></svg><span>PowerShell · your computer</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>((Get-Content $HOME\Downloads\repoledger*.private-key.pem -Raw).Trim() -replace "\r?\n", '\n') | Set-Clipboard</code></pre></div>
+            <div class="code only-unix"><div class="code-head"><span class="where"><svg class="i"><use href="#i-pc"/></svg><span>Terminal · your computer</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>awk -v ORS='\\n' '1' ~/Downloads/repoledger*.private-key.pem | pbcopy
+<span class="c"># Linux: replace pbcopy with  xclip -selection clipboard</span></code></pre></div>
+            <p class="fine">The pattern matches a key whose app name starts with "RepoLedger". If you named the app differently, or have several keys in Downloads, use the exact file name.</p>
+            <div class="callout warn"><svg class="i"><use href="#i-alert"/></svg><div><p>The private key lets anyone act as your app on every account that installed it. It never goes in Git, chat or a screenshot. Delete the downloaded <code>.pem</code> once it's stored in Step 6.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 6 ================= -->
+          <section class="card doc-card" id="s6" data-step="s6">
+            <div class="step-head">
+              <span class="step-badge">6</span>
+              <div><h2>Store secrets and give the server a role</h2><p class="step-learn">Learn: Parameter Store, KMS encryption, IAM roles, least privilege</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s6" /> Done</label>
+            </div>
+            <h3>6a · Parameter Store</h3>
+            <p><em class="ui">Systems Manager → Parameter Store → Create parameter</em>, one per row, Standard tier. The last part of each name becomes the environment variable.</p>
+            <div class="doc-table"><table>
+              <thead><tr><th>Name</th><th>Type</th><th>Value</th></tr></thead>
+              <tbody>
+                <tr><td><code>/repoledger/DATABASE_URL</code></td><td>SecureString</td><td><span class="only-rds">Connection string from Step 2</span><span class="only-supa">Your Supabase <strong>Transaction pooler</strong> URL (EC2 has IPv4 only)</span></td></tr>
+                <tr class="only-rds"><td><code>/repoledger/DATABASE_SSL_CA</code></td><td>String</td><td><code>/app/rds-ca.pem</code></td></tr>
+                <tr><td><code>/repoledger/PUBLIC_URL</code></td><td>String</td><td><code>https://<span class="v" data-v="host">13-233-10-20.sslip.io</span></code></td></tr>
+                <tr><td><code>/repoledger/NODE_ENV</code></td><td>String</td><td><code>production</code></td></tr>
+                <tr><td><code>/repoledger/GITHUB_APP_ID</code></td><td>String</td><td>App ID</td></tr>
+                <tr><td><code>/repoledger/GITHUB_APP_SLUG</code></td><td>String</td><td>Slug</td></tr>
+                <tr><td><code>/repoledger/GITHUB_APP_CLIENT_ID</code></td><td>String</td><td>Client ID</td></tr>
+                <tr><td><code>/repoledger/GITHUB_APP_CLIENT_SECRET</code></td><td>SecureString</td><td>Client secret</td></tr>
+                <tr><td><code>/repoledger/GITHUB_APP_PRIVATE_KEY</code></td><td>SecureString</td><td>One-line key from your clipboard</td></tr>
+                <tr><td><code>/repoledger/GITHUB_PUBLIC_TOKEN</code></td><td>SecureString</td><td>Lookup token from Step 0</td></tr>
+                <tr><td><code>/repoledger/SOURCE_URL</code></td><td>String</td><td><code class="v" data-v="repoweb">https://github.com/your-name/repoledger</code> (optional: links the landing page to your code)</td></tr>
+              </tbody>
+            </table></div>
+            <h3>6b · IAM role for the server</h3>
+            <p><em class="ui">IAM → Roles → Create role</em> → AWS service → <strong>EC2</strong>, no managed policies, name <code>repoledger-ec2-role</code>. Then <em class="ui">Add permissions → Create inline policy → JSON</em>, named <code>read-repoledger-params</code>:</p>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-file"/></svg><span>IAM policy JSON</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:GetParametersByPath", "ssm:GetParameter"],
+      "Resource": [
+        "arn:aws:ssm:<span class="v" data-v="region">ap-south-1</span>:<span class="v" data-v="account">123456789012</span>:parameter/repoledger",
+        "arn:aws:ssm:<span class="v" data-v="region">ap-south-1</span>:<span class="v" data-v="account">123456789012</span>:parameter/repoledger/*"
+      ]
+    }
+  ]
+}</code></pre></div>
+            <p>Attach it: <em class="ui">EC2 → repoledger-server → Actions → Security → Modify IAM role</em>. Then test on the server; the first command should mention <code>assumed-role/repoledger-ec2-role</code>:</p>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>aws sts get-caller-identity
+aws ssm get-parameter --region <span class="v" data-v="region">ap-south-1</span> --name /repoledger/PUBLIC_URL --query Parameter.Value --output text</code></pre></div>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p>This is <strong>least privilege</strong>: the server may read only <code>/repoledger/*</code>. No access keys exist on disk; the instance gets temporary credentials from its metadata service and AWS rotates them. If you see <code>AccessDenied</code> on <code>kms:Decrypt</code>, add that action to the policy.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 7 ================= -->
+          <section class="card doc-card" id="s7" data-step="s7">
+            <div class="step-head">
+              <span class="step-badge">7</span>
+              <div><h2>Run it with Compose and Caddy</h2><p class="step-learn">Learn: Docker Compose, private container networks, automatic HTTPS</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s7" /> Done</label>
+            </div>
+            <p>There is no separate frontend deploy: Express serves <code>public/</code> itself. Deployment files live in <code>~/deploy</code>, outside the Git checkout, so <code>git pull</code> never touches them.</p>
+
+            <h3>7a · Settings file from Parameter Store</h3>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>mkdir -p ~/deploy &amp;&amp; cd ~/deploy
+<span class="only-rds">curl -so rds-ca.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+</span><span class="only-supa">touch rds-ca.pem   <span class="c"># unused on Supabase, but compose.yaml mounts it</span>
+</span>
+cat &gt; fetch-env.sh &lt;&lt;'EOF'
+#!/bin/bash
+set -euo pipefail
+cd ~/deploy
+aws ssm get-parameters-by-path --region <span class="v" data-v="region">ap-south-1</span> --path /repoledger/ --with-decryption \
+  --query 'Parameters[].[Name,Value]' --output text |
+while IFS=$'\t' read -r name value; do
+  printf '%s=%s\n' "${name##*/}" "$value"
+done &gt; .env.new
+chmod 600 .env.new &amp;&amp; mv .env.new .env
+echo "Wrote $(wc -l &lt; .env) settings to ~/deploy/.env"
+EOF
+chmod +x fetch-env.sh &amp;&amp; ./fetch-env.sh</code></pre></div>
+            <p class="fine"><code>${name##*/}</code> strips everything up to the last <code>/</code>, so <code>/repoledger/PUBLIC_URL</code> becomes <code>PUBLIC_URL</code>.</p>
+
+            <h3>7b · Caddyfile and compose.yaml</h3>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>cat &gt; Caddyfile &lt;&lt;'EOF'
+<span class="v" data-v="host">13-233-10-20.sslip.io</span> {
+	reverse_proxy web:8600
+}
+EOF
+
+cat &gt; compose.yaml &lt;&lt;'EOF'
+services:
+  web:
+    image: repoledger:latest
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./rds-ca.pem:/app/rds-ca.pem:ro
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:
+EOF</code></pre></div>
+            <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p>Only Caddy publishes ports. Port 8600 exists only on Compose's private network, where Caddy finds the app by its service name <code>web</code>, so nobody can bypass HTTPS. With one proxy in front, RepoLedger's <code>TRUST_PROXY</code> default is already right and rate limits see real visitor IPs.</p></div></div>
+
+            <h3>7c · Build, create tables, start</h3>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>cd ~/repoledger &amp;&amp; docker build -t repoledger:latest . &amp;&amp; cd ~/deploy
+docker compose run --rm web npm run init-db    <span class="c"># safe to repeat: only adds what's missing</span>
+docker compose up -d
+docker compose ps                              <span class="c"># both "running"</span>
+docker compose logs -f                         <span class="c"># Ctrl+C to stop following</span></code></pre></div>
+            <div class="only-rds">
+              <p><strong>Optional: bring existing data across.</strong> If you already ran RepoLedger on Supabase, this keeps traffic history GitHub no longer has. Run it <em>before</em> <code>init-db</code>, with Supabase's <strong>Session pooler</strong> URL; the transaction pooler can't run <code>pg_dump</code>.</p>
+              <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>docker run --rm postgres:17 pg_dump --no-owner --no-privileges --schema=public \
+  "SUPABASE_SESSION_POOLER_URL" &gt; dump.sql
+docker run --rm -i postgres:17 psql "RDS_DATABASE_URL" &lt; dump.sql
+rm dump.sql   <span class="c"># contains session hashes and stats</span></code></pre></div>
+            </div>
+            <p>Look for <code>RepoLedger is running</code> and Caddy's <code>certificate obtained successfully</code> (about 30 seconds). Then open <a id="site-link" href="https://13-233-10-20.sslip.io" target="_blank" rel="noopener">https://<span class="v" data-v="host">13-233-10-20.sslip.io</span></a>.</p>
+            <div class="callout warn"><svg class="i"><use href="#i-alert"/></svg><div><p>No certificate? Ports 80 and 443 are blocked, or the Caddyfile host doesn't match the Elastic IP. sslip.io shares Let's Encrypt's weekly limits with other users; if issuance is refused, a free DuckDNS subdomain or your own domain works the same way.</p></div></div>
+          </section>
+
+          <!-- ================= STEP 8 ================= -->
+          <section class="card doc-card" id="s8" data-step="s8">
+            <div class="step-head">
+              <span class="step-badge">8</span>
+              <div><h2>Schedule the collector</h2><p class="step-learn">Learn: cron syntax, why private databases change where jobs run</p></div>
+              <label class="done-toggle"><input type="checkbox" id="done-s8" /> Done</label>
+            </div>
+            <div class="only-rds">
+              <p>GitHub Actions runners live on the internet, and your database deliberately doesn't, so the collector moves onto the server. Test once, then schedule:</p>
+              <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-term"/></svg><span>bash · server</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>cd ~/deploy &amp;&amp; docker compose run --rm web npm run collect
+
+(crontab -l 2&gt;/dev/null; echo '15 */6 * * * cd /home/ec2-user/deploy &amp;&amp; /usr/bin/docker compose run --rm web npm run collect &gt;&gt; /home/ec2-user/collect.log 2&gt;&amp;1') | crontab -
+crontab -l</code></pre></div>
+              <p>If you turned on GitHub Actions in your fork, disable the scheduled one: <em class="ui">Actions → Collect GitHub stats → ··· → Disable workflow</em>, so two collectors don't run.</p>
+              <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p>A cron line has five time fields: minute, hour, day, month, weekday. <code>15 */6 * * *</code> means "minute 15 of every 6th hour". Server time is UTC.</p></div></div>
+            </div>
+            <div class="only-supa">
+              <p>Supabase is reachable from the internet, so the GitHub Actions workflow that ships in the repository can keep collecting:</p>
+              <ol class="doc-list">
+                <li>Forks start with workflows turned off. Open your fork's <em class="ui">Actions</em> tab and enable them.</li>
+                <li>Add the repository secrets <code>DATABASE_URL</code>, <code>APP_ID</code> and <code>APP_PRIVATE_KEY</code> (<em class="ui">Settings → Secrets and variables → Actions</em>), using the <strong>production</strong> app from Step 5.</li>
+                <li>Run it once from <em class="ui">Actions → Collect GitHub stats → Run workflow</em>.</li>
+              </ol>
+              <div class="callout"><svg class="i"><use href="#i-book"/></svg><div><p>GitHub pauses scheduled workflows in public repositories after 60 days without activity. If collection stops, any commit or re-enabling the workflow restarts it.</p></div></div>
+            </div>
+          </section>
+
+          <!-- ================= VERIFY ================= -->
+          <section class="card doc-card" id="verify">
+            <div class="step-head plain">
+              <div><h2>Verify, debug and monitor</h2><p class="step-learn">Done means all six checks pass, including a reboot.</p></div>
+            </div>
+            <ul class="checks">
+              <li><label><input type="checkbox" id="chk-1" /><span><code>/healthz</code> returns <code>{"ok":true}</code>: the process is up.</span></label></li>
+              <li><label><input type="checkbox" id="chk-2" /><span><code>/readyz</code> succeeds: the app reaches the database.</span></label></li>
+              <li><label><input type="checkbox" id="chk-3" /><span><code>/u/&lt;your-username&gt;</code> loads a public lookup with charts.</span></label></li>
+              <li><label><input type="checkbox" id="chk-4" /><span><strong>Sign in</strong>, install the app on a repository, land back on your dashboard.</span></label></li>
+              <li><label><input type="checkbox" id="chk-5" /><span><code>sudo reboot</code>, wait 2 minutes: the site returns on its own.</span></label></li>
+              <li><label><input type="checkbox" id="chk-6" /><span>After the next 6-hour mark, a collection finished (<code>tail ~/collect.log</code> or the Actions tab).</span></label></li>
+            </ul>
+
+            <h3>When something is wrong</h3>
+            <p>Start with <code>docker compose ps</code> and <code>docker compose logs --tail 100 web</code> in <code>~/deploy</code>. After changing a parameter, run <code>./fetch-env.sh &amp;&amp; docker compose up -d</code>.</p>
+            <div class="faq">
+              <details><summary>SSH times out</summary><p>Your public IP changed. <strong>Fix:</strong> set the SSH rule in <code>repoledger-web-sg</code> back to <em class="ui">My IP</em>.</p></details>
+              <details><summary>UNPROTECTED PRIVATE KEY FILE</summary><p>Other users can read the key. <strong>Fix:</strong> re-run the <span class="only-win"><code>icacls</code></span><span class="only-unix"><code>chmod 400</code></span> line from Step 4.</p></details>
+              <details><summary>Build killed, exit code 137</summary><p>Out of memory. <strong>Fix:</strong> check swap is on with <code>free -h</code>.</p></details>
+              <details><summary>AccessDenied from aws ssm</summary><p>Role not attached, or wrong account ID or region in the policy. <strong>Fix:</strong> recheck Step 6b.</p></details>
+              <details><summary>App exits: DATABASE_URL must be set</summary><p><code>.env</code> is empty or missing. <strong>Fix:</strong> <code>./fetch-env.sh</code> then <code>docker compose up -d</code>.</p></details>
+              <details class="only-rds"><summary>Database connection timeout</summary><p>DB security group rule missing, or wrong endpoint. <strong>Fix:</strong> <code>repoledger-db-sg</code> must allow 5432 from <code>repoledger-web-sg</code>.</p></details>
+              <details><summary>password authentication failed</summary><p>Wrong password, or a special character not URL-encoded. <strong>Fix:</strong> correct <code>/repoledger/DATABASE_URL</code>, re-fetch, restart.</p></details>
+              <details class="only-rds"><summary>unable to get local issuer certificate</summary><p><code>rds-ca.pem</code> missing or wrong path. <strong>Fix:</strong> <code>ls -l ~/deploy/rds-ca.pem</code>; <code>DATABASE_SSL_CA</code> must be <code>/app/rds-ca.pem</code>.</p></details>
+              <details><summary>502 Bad Gateway</summary><p>Caddy is up but the app crashed. <strong>Fix:</strong> read <code>docker compose logs web</code>.</p></details>
+              <details><summary>Browser warns about the certificate</summary><p>Caddy couldn't get one. <strong>Fix:</strong> are ports 80 and 443 open? Does the Caddyfile host match the Elastic IP?</p></details>
+              <details><summary>redirect_uri is not associated with this application</summary><p>The app's callback URL differs from <code>PUBLIC_URL</code>. <strong>Fix:</strong> make both exactly <code>https://<span class="v" data-v="host">13-233-10-20.sslip.io</span></code>, no trailing slash.</p></details>
+              <details><summary>Sign-in returns but you're not signed in</summary><p><code>PUBLIC_URL</code> is <code>http://</code> or a different host, so the cookie is rejected. <strong>Fix:</strong> correct it, re-fetch, <code>docker compose up -d</code>.</p></details>
+            </div>
+
+            <h3>Alarms worth setting</h3>
+            <ul class="doc-list">
+              <li><strong>Auto-recovery:</strong> instance → <em class="ui">Status checks → Actions → Create status check alarm</em>, on <em class="ui">System status check failed</em>, action <strong>Recover</strong>, and notify an SNS topic with your email subscribed.</li>
+              <li class="only-rds"><strong>Database disk:</strong> CloudWatch alarm on <code>repoledger-db</code> <em class="ui">FreeStorageSpace</em> below 2 GB.</li>
+              <li><strong>CPU credits:</strong> watch <em class="ui">CPU credit balance</em>; stuck near zero means the instance is too small.</li>
+            </ul>
+          </section>
+
+          <!-- ================= COSTS ================= -->
+          <section class="card doc-card" id="costs">
+            <div class="step-head plain">
+              <div><h2>Costs, updates and cleanup</h2><p class="step-learn">Rough monthly prices for ap-south-1; other regions differ a little. Check the <a href="https://calculator.aws/" target="_blank" rel="noopener">AWS Pricing Calculator</a> for yours.</p></div>
+            </div>
+            <div class="doc-table"><table>
+              <thead><tr><th>Resource</th><th>Approx. / month</th><th>Free tier</th></tr></thead>
+              <tbody>
+                <tr><td>EC2 <code>t3.micro</code>, always on</td><td>~$8</td><td>Covered</td></tr>
+                <tr><td>Public IPv4 (Elastic IP)</td><td>~$3.6</td><td>Covered for one EC2 IP</td></tr>
+                <tr><td>EBS gp3 20 GiB</td><td>~$2</td><td>Covered up to 30 GiB</td></tr>
+                <tr class="only-rds"><td>RDS <code>db.t4g.micro</code> + 20 GiB</td><td>~$17</td><td>Covered (750 h, 20 GiB)</td></tr>
+                <tr><td>Parameter Store, basic CloudWatch</td><td>~$0</td><td>Free</td></tr>
+                <tr><td><strong>Total outside free tier</strong></td><td><strong class="only-rds">~$30</strong><strong class="only-supa">~$14</strong></td><td></td></tr>
+              </tbody>
+            </table></div>
+            <div class="callout warn"><svg class="i"><use href="#i-alert"/></svg><div>
+              <p><strong>T3 "unlimited" mode</strong> bills for bursting past CPU credits. Set <em class="ui">Actions → Instance settings → Change credit specification</em> to <strong>Standard</strong>.</p>
+              <p><strong>Stopped is not free:</strong> the disk and Elastic IP keep billing<span class="only-rds">, and a stopped RDS database restarts itself after 7 days</span>.</p>
+            </div></div>
+
+            <h3>Deploying an update</h3>
+            <p>After you push to your fork, run this on the server. Save it once as <code>~/deploy/update.sh</code> and <code>chmod +x</code> it.</p>
+            <div class="code"><div class="code-head"><span class="where"><svg class="i"><use href="#i-file"/></svg><span>~/deploy/update.sh</span></span><button class="copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+<pre><code>#!/bin/bash
+set -euo pipefail
+cd ~/repoledger &amp;&amp; git pull --ff-only
+docker build -t repoledger:latest .
+cd ~/deploy &amp;&amp; ./fetch-env.sh
+docker compose run --rm web npm run init-db   <span class="c"># applies schema changes</span>
+docker compose up -d                          <span class="c"># swaps to the new image</span>
+docker image prune -f                         <span class="c"># old images can't fill the disk</span></code></pre></div>
+
+            <h3>Tearing it all down</h3>
+            <ol class="doc-list">
+              <li><strong>EC2 instance:</strong> <em class="ui">Instance state → Terminate</em>.</li>
+              <li><strong>Elastic IP:</strong> <em class="ui">Actions → Release</em>.</li>
+              <li class="only-rds"><strong>RDS:</strong> <em class="ui">Actions → Delete</em>; untick <em class="ui">Retain automated backups</em>.</li>
+              <li><strong>Security groups:</strong> <span class="only-rds"><code>repoledger-db-sg</code> first, then </span><code>repoledger-web-sg</code>.</li>
+              <li><strong>Parameters</strong> under <code>/repoledger/</code>, the IAM role, alarms and SNS topic.</li>
+              <li><strong>GitHub:</strong> delete the production app or keep it<span class="only-supa">, and disable the collect workflow in your fork</span>.</li>
+            </ol>
+
+            <h3>What to learn next</h3>
+            <dl class="terms">
+              <div class="term"><dt>Session Manager</dt><dd>Add <code>AmazonSSMManagedInstanceCore</code> to the role, connect from the console, close port 22.</dd></div>
+              <div class="term"><dt>Infrastructure as code</dt><dd>Describe this stack in CloudFormation or Terraform: one deploy, one delete.</dd></div>
+              <div class="term"><dt>CI/CD with ECR</dt><dd>GitHub Actions builds the image, pushes to ECR, and SSM Run Command pulls it on the server.</dd></div>
+              <div class="term"><dt>Central logs</dt><dd>Compose's <code>awslogs</code> driver sends app logs to CloudWatch Logs, kept even if the server dies.</dd></div>
+              <div class="term"><dt>A real domain</dt><dd>Route 53 DNS pointing at the Elastic IP. Only the Caddyfile, <code>PUBLIC_URL</code> and app URLs change.</dd></div>
+            </dl>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <span class="brand brand-sm">
+          <svg class="brand-mark" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor"/><rect x="8" y="17" width="4" height="7" rx="1" fill="#fff"/><rect x="14" y="12" width="4" height="12" rx="1" fill="#fff"/><rect x="20" y="8" width="4" height="16" rx="1" fill="#fff"/></svg>
+          RepoLedger
+        </span>
+        <nav class="footer-links" aria-label="Footer">
+          <a href="/how-it-works">How it works</a>
+          <a href="/deploy">Deploy on AWS</a>
+        </nav>
+        <span>Data from the GitHub REST API. Not affiliated with GitHub.</span>
+      </div>
+    </footer>
+
+    <script src="/site.js"></script>
+    <script src="/deploy.js"></script>
+  </body>
+</html>
