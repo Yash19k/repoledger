@@ -20,17 +20,41 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      # Until the repository secrets are added (README, "Scheduled collection"),
+      # skip quietly instead of failing every six hours.
+      - name: Check configuration
+        id: config
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          missing=""
+          for name in DATABASE_URL APP_ID APP_PRIVATE_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=Collection skipped::Repository secrets not set:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+        if: steps.config.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v5
+        if: steps.config.outputs.ready == 'true'
         with:
           node-version: "22"
           cache: npm
 
       - name: Install dependencies
+        if: steps.config.outputs.ready == 'true'
         run: npm ci --omit=dev
 
       - name: Collect stats for every installation
+        if: steps.config.outputs.ready == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GITHUB_APP_ID: ${{ secrets.APP_ID }}
